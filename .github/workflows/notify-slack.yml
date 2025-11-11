@@ -1,0 +1,109 @@
+---
+name: Notify Slack
+
+'on':
+  workflow_run:
+    workflows: ["Self-Heal Agent"]
+    types:
+      - completed
+
+jobs:
+  notify:
+    name: Send Slack Notification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Determine workflow status
+        id: status
+        run: |
+          CONCLUSION="${{ github.event.workflow_run.conclusion }}"
+          if [ "${CONCLUSION}" == "success" ]; then
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+            echo "status_text=succeeded" >> $GITHUB_OUTPUT
+          elif [ "${CONCLUSION}" == "failure" ]; then
+            echo "emoji=:x:" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+            echo "status_text=failed" >> $GITHUB_OUTPUT
+          else
+            echo "emoji=:warning:" >> $GITHUB_OUTPUT
+            echo "color=warning" >> $GITHUB_OUTPUT
+            echo "status_text=${CONCLUSION}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          # Prepare Slack message payload
+          RUN_TIME="$(date -u -d \
+            "${{ github.event.workflow_run.created_at }}" \
+            "+%Y-%m-%d %H:%M:%S UTC")"
+
+          cat <<EOF > /tmp/slack-payload.json
+          {
+            "text": "EchoForge Self-Heal Agent Workflow Completed",
+            "attachments": [
+              {
+                "color": "${{ steps.status.outputs.color }}",
+                "fields": [
+                  {
+                    "title": "Status",
+                    "value": "${{ steps.status.outputs.emoji }} \
+          ${{ steps.status.outputs.status_text }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Repository",
+                    "value": "${{ github.repository }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Workflow",
+                    "value": "${{ github.event.workflow_run.name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Run Number",
+                    "value": "#${{ github.event.workflow_run.run_number }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Triggered By",
+                    "value": "${{ github.event.workflow_run.actor.login }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Run Time",
+                    "value": "${RUN_TIME}",
+                    "short": true
+                  }
+                ],
+                "actions": [
+                  {
+                    "type": "button",
+                    "text": "View Workflow Run",
+                    "url": "${{ github.event.workflow_run.html_url }}"
+                  }
+                ]
+              }
+            ]
+          }
+          EOF
+
+          # Send to Slack
+          curl -X POST \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/slack-payload.json \
+            "${SLACK_WEBHOOK_URL}"
+
+          echo "Slack notification sent successfully"
+
+      - name: Skip notification (no webhook configured)
+        if: ${{ secrets.SLACK_WEBHOOK_URL == '' }}
+        run: |
+          echo "SLACK_WEBHOOK_URL secret not configured"
+          echo "To enable Slack notifications:"
+          echo "  gh secret set SLACK_WEBHOOK_URL \\"
+          echo "    --repo ${{ github.repository }}"

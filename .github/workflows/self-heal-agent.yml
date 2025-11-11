@@ -1,0 +1,189 @@
+---
+name: Self-Heal Agent
+
+'on':
+  # Scheduled weekly backup every Sunday at 3 AM UTC
+  schedule:
+    - cron: '0 3 * * SUN'
+
+  # Manual workflow dispatch with parameters
+  workflow_dispatch:
+    inputs:
+      backup_source:
+        description: 'Cloud provider for backup/restore'
+        required: true
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+        default: 'aws'
+      operation:
+        description: 'Operation to perform'
+        required: true
+        type: choice
+        options:
+          - backup
+          - restore
+        default: 'backup'
+      filename:
+        description: >-
+          Filename for restore (optional,
+          e.g., echoforge-backup-20231115_030000.tar.gz)
+        required: false
+        type: string
+
+jobs:
+  backup:
+    name: Backup Repository
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ github.event_name == 'schedule' ||
+          (github.event_name == 'workflow_dispatch' &&
+           inputs.operation == 'backup') }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for git archive
+
+      - name: Configure AWS credentials
+        if: >-
+          ${{ github.event_name == 'schedule' ||
+              inputs.backup_source == 'aws' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Execute AWS backup
+        if: >-
+          ${{ github.event_name == 'schedule' ||
+              inputs.backup_source == 'aws' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+        run: |
+          bash infra/aws-backup.sh
+
+      - name: Execute Azure backup
+        if: >-
+          ${{ github.event_name == 'workflow_dispatch' &&
+              inputs.backup_source == 'azure' }}
+        run: |
+          echo "Azure backup placeholder - implementation pending"
+          bash infra/azure-backup.sh
+
+      - name: Execute GCP backup
+        if: >-
+          ${{ github.event_name == 'workflow_dispatch' &&
+              inputs.backup_source == 'gcp' }}
+        run: |
+          echo "GCP backup placeholder - implementation pending"
+          bash infra/gcp-backup.sh
+
+      - name: Log to CloudWatch
+        if: >-
+          ${{ always() &&
+              (github.event_name == 'schedule' ||
+               inputs.backup_source == 'aws') }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          LOG_MSG="Backup workflow completed at $(date -Iseconds)"
+          LOG_MSG="${LOG_MSG} - Status: ${{ job.status }}"
+          echo "${LOG_MSG}" | bash infra/aws-cloudwatch-log.sh
+
+  restore:
+    name: Restore from Backup
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' &&
+          inputs.operation == 'restore' }}
+
+    steps:
+      - name: Validate restore filename
+        if: ${{ inputs.filename == '' }}
+        run: |
+          echo "Error: filename parameter is required for restore"
+          exit 1
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.backup_source == 'aws' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Restore from AWS
+        if: ${{ inputs.backup_source == 'aws' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+        run: |
+          echo "========================================="
+          echo "EchoForge Restore from AWS"
+          echo "========================================="
+          echo "Filename: ${{ inputs.filename }}"
+          echo "Bucket: ${BACKUP_BUCKET}"
+          echo "========================================="
+
+          # Download backup from S3
+          echo "Downloading backup from S3..."
+          FNAME="${{ inputs.filename }}"
+          aws s3 cp "s3://${BACKUP_BUCKET}/${FNAME}" \
+            "/tmp/${FNAME}" --region "${AWS_REGION}"
+
+          # Verify archive
+          echo "Verifying archive integrity..."
+          if ! tar -tzf "/tmp/${FNAME}" > /dev/null; then
+            echo "Error: Archive verification failed"
+            exit 1
+          fi
+
+          # Extract archive
+          echo "Extracting archive..."
+          mkdir -p /tmp/restore
+          tar -xzf "/tmp/${FNAME}" -C /tmp/restore
+
+          echo "========================================="
+          echo "Restore completed successfully!"
+          echo "Files extracted to: /tmp/restore/"
+          echo "========================================="
+
+          # List restored files
+          echo "Restored contents:"
+          ls -la /tmp/restore/
+
+      - name: Restore from Azure
+        if: ${{ inputs.backup_source == 'azure' }}
+        run: |
+          echo "Azure restore placeholder - implementation pending"
+          echo "Would restore: ${{ inputs.filename }}"
+
+      - name: Restore from GCP
+        if: ${{ inputs.backup_source == 'gcp' }}
+        run: |
+          echo "GCP restore placeholder - implementation pending"
+          echo "Would restore: ${{ inputs.filename }}"
+
+      - name: Log to CloudWatch
+        if: ${{ always() && inputs.backup_source == 'aws' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          LOG_MSG="Restore workflow completed at $(date -Iseconds)"
+          LOG_MSG="${LOG_MSG} - Status: ${{ job.status }}"
+          LOG_MSG="${LOG_MSG} - File: ${{ inputs.filename }}"
+          echo "${LOG_MSG}" | bash infra/aws-cloudwatch-log.sh
