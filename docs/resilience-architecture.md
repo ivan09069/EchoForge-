@@ -11,6 +11,35 @@ The resilience infrastructure provides:
 - **Real-time notifications** via Slack webhooks
 - **Secure, encrypted storage** with lifecycle management
 - **Least-privilege access** for all operations
+- **Integrity validation** with checksum verification
+- **Automated disaster recovery drills** (quarterly)
+- **Infrastructure as Code** with Terraform for all cloud providers
+
+## Required Secrets
+
+All secrets are configured via GitHub Actions secrets and can be set using the bootstrap script or manually.
+
+### AWS Secrets (if using AWS)
+- `AWS_REGION`: AWS region (e.g., us-west-2)
+- `AWS_ACCESS_KEY_ID`: IAM user access key from Terraform
+- `AWS_SECRET_ACCESS_KEY`: IAM user secret key from Terraform
+- `BACKUP_BUCKET`: S3 bucket name from Terraform
+
+### Azure Secrets (if using Azure)
+- `AZURE_STORAGE_ACCOUNT`: Storage account name from Terraform
+- `AZURE_STORAGE_KEY`: Storage account access key from Terraform
+- `AZURE_CONTAINER_NAME`: Blob container name (default: backups)
+- `AZURE_CREDENTIALS`: Service principal credentials in JSON format
+
+### GCP Secrets (if using GCP)
+- `GCP_PROJECT_ID`: GCP project identifier
+- `GCP_BUCKET_NAME`: Cloud Storage bucket name
+- `GCP_CREDENTIALS`: Service account key (base64-encoded JSON)
+
+### Optional Secrets
+- `SLACK_WEBHOOK_URL`: Slack webhook for workflow notifications
+
+**Setup**: Run `./scripts/setup-gh-secrets.sh` after deploying Terraform infrastructure.
 
 ## Components
 
