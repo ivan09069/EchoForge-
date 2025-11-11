@@ -1,0 +1,28 @@
+{
+  "name": "echoforge",
+  "version": "0.1.0",
+  "description": "Zero-leakage, biometric-secured portfolio tracker with FIDO2 authentication",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "idb": "^7.1.1"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^14.0.0",
+    "@testing-library/jest-dom": "^6.1.0",
+    "eslint": "^8.50.0",
+    "eslint-config-next": "^14.0.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}

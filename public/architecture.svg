@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <!-- Title -->
+  <text x="400" y="30" font-size="24" font-weight="bold" text-anchor="middle" fill="#0070f3">
+    EchoForge Architecture
+  </text>
+  
+  <!-- User Layer -->
+  <g id="user-layer">
+    <rect x="50" y="70" width="700" height="100" rx="10" fill="#e3f2fd" stroke="#0070f3" stroke-width="2"/>
+    <text x="400" y="100" font-size="18" font-weight="bold" text-anchor="middle" fill="#0070f3">
+      User Interface Layer
+    </text>
+    
+    <!-- UI Components -->
+    <rect x="80" y="115" width="120" height="40" rx="5" fill="#ffffff" stroke="#0070f3" stroke-width="1.5"/>
+    <text x="140" y="140" font-size="12" text-anchor="middle" fill="#333">Landing Page</text>
+    
+    <rect x="230" y="115" width="120" height="40" rx="5" fill="#ffffff" stroke="#0070f3" stroke-width="1.5"/>
+    <text x="290" y="140" font-size="12" text-anchor="middle" fill="#333">Login (FIDO2)</text>
+    
+    <rect x="380" y="115" width="120" height="40" rx="5" fill="#ffffff" stroke="#0070f3" stroke-width="1.5"/>
+    <text x="440" y="140" font-size="12" text-anchor="middle" fill="#333">Dashboard</text>
+    
+    <rect x="530" y="115" width="120" height="40" rx="5" fill="#ffffff" stroke="#0070f3" stroke-width="1.5"/>
+    <text x="590" y="140" font-size="12" text-anchor="middle" fill="#333">Price Feed</text>
+  </g>
+  
+  <!-- Security Layer -->
+  <g id="security-layer">
+    <rect x="50" y="200" width="700" height="100" rx="10" fill="#fff3e0" stroke="#ff9800" stroke-width="2"/>
+    <text x="400" y="230" font-size="18" font-weight="bold" text-anchor="middle" fill="#ff9800">
+      Security Layer
+    </text>
+    
+    <!-- Security Components -->
+    <rect x="100" y="245" width="180" height="40" rx="5" fill="#ffffff" stroke="#ff9800" stroke-width="1.5"/>
+    <text x="190" y="270" font-size="12" text-anchor="middle" fill="#333">FIDO2/WebAuthn</text>
+    
+    <rect x="310" y="245" width="180" height="40" rx="5" fill="#ffffff" stroke="#ff9800" stroke-width="1.5"/>
+    <text x="400" y="270" font-size="12" text-anchor="middle" fill="#333">AES-GCM Encryption</text>
+    
+    <rect x="520" y="245" width="180" height="40" rx="5" fill="#ffffff" stroke="#ff9800" stroke-width="1.5"/>
+    <text x="610" y="270" font-size="12" text-anchor="middle" fill="#333">Web Crypto API</text>
+  </g>
+  
+  <!-- Data Layer -->
+  <g id="data-layer">
+    <rect x="50" y="330" width="700" height="100" rx="10" fill="#e8f5e9" stroke="#00c853" stroke-width="2"/>
+    <text x="400" y="360" font-size="18" font-weight="bold" text-anchor="middle" fill="#00c853">
+      Data Storage Layer
+    </text>
+    
+    <!-- Data Components -->
+    <rect x="120" y="375" width="150" height="40" rx="5" fill="#ffffff" stroke="#00c853" stroke-width="1.5"/>
+    <text x="195" y="400" font-size="12" text-anchor="middle" fill="#333">IndexedDB</text>
+    
+    <rect x="300" y="375" width="200" height="40" rx="5" fill="#ffffff" stroke="#00c853" stroke-width="1.5"/>
+    <text x="400" y="400" font-size="12" text-anchor="middle" fill="#333">Encrypted Local Storage</text>
+    
+    <rect x="530" y="375" width="150" height="40" rx="5" fill="#ffffff" stroke="#00c853" stroke-width="1.5"/>
+    <text x="605" y="400" font-size="12" text-anchor="middle" fill="#333">Session Cache</text>
+  </g>
+  
+  <!-- External Services -->
+  <g id="external-layer">
+    <rect x="50" y="460" width="700" height="100" rx="10" fill="#f3e5f5" stroke="#7928ca" stroke-width="2"/>
+    <text x="400" y="490" font-size="18" font-weight="bold" text-anchor="middle" fill="#7928ca">
+      External Services (Optional)
+    </text>
+    
+    <!-- External Components -->
+    <rect x="150" y="505" width="180" height="40" rx="5" fill="#ffffff" stroke="#7928ca" stroke-width="1.5"/>
+    <text x="240" y="530" font-size="12" text-anchor="middle" fill="#333">WebSocket Feeds</text>
+    
+    <rect x="370" y="505" width="180" height="40" rx="5" fill="#ffffff" stroke="#7928ca" stroke-width="1.5"/>
+    <text x="460" y="530" font-size="12" text-anchor="middle" fill="#333">Price APIs</text>
+  </g>
+  
+  <!-- Arrows showing data flow -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#666" />
+    </marker>
+  </defs>
+  
+  <!-- Vertical connections -->
+  <line x1="140" y1="155" x2="140" y2="200" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="290" y1="155" x2="240" y2="200" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="440" y1="155" x2="400" y2="200" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="590" y1="155" x2="610" y2="200" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <line x1="195" y1="285" x2="195" y2="330" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="400" y1="285" x2="400" y2="330" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="605" y1="285" x2="605" y2="330" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)"/>
+  
+  <line x1="240" y1="415" x2="240" y2="460" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)" stroke-dasharray="5,5"/>
+  <line x1="460" y1="415" x2="460" y2="460" stroke="#666" stroke-width="2" marker-end="url(#arrowhead)" stroke-dasharray="5,5"/>
+  
+  <!-- Legend -->
+  <g id="legend" transform="translate(600, 565)">
+    <text x="0" y="0" font-size="10" fill="#666">Solid = Core • Dashed = Optional</text>
+  </g>
+  
+  <!-- Key Features -->
+  <g id="features" transform="translate(50, 565)">
+    <text x="0" y="0" font-size="10" font-weight="bold" fill="#0070f3">✓ Zero Server Dependencies</text>
+    <text x="150" y="0" font-size="10" font-weight="bold" fill="#00c853">✓ Client-Side Encryption</text>
+    <text x="300" y="0" font-size="10" font-weight="bold" fill="#ff9800">✓ Biometric Auth</text>
+  </g>
+</svg>
