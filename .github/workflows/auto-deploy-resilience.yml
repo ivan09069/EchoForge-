@@ -34,6 +34,8 @@ jobs:
   deploy-aws:
     name: Deploy AWS Infrastructure
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       ${{ inputs.cloud_provider == 'aws' || inputs.cloud_provider == 'all' }}
     
@@ -106,6 +108,8 @@ jobs:
   deploy-azure:
     name: Deploy Azure Infrastructure
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       ${{ inputs.cloud_provider == 'azure' || inputs.cloud_provider == 'all' }}
     
@@ -172,6 +176,8 @@ jobs:
   deploy-gcp:
     name: Deploy GCP Infrastructure
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: >-
       ${{ inputs.cloud_provider == 'gcp' || inputs.cloud_provider == 'all' }}
     
@@ -241,6 +247,8 @@ jobs:
   summary:
     name: Deployment Summary
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [deploy-aws, deploy-azure, deploy-gcp]
     if: always()
     

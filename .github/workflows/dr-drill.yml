@@ -33,6 +33,8 @@ jobs:
   prepare-drill:
     name: Prepare DR Drill
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       backup_file: ${{ steps.select-backup.outputs.backup_file }}
       cloud_provider: ${{ steps.determine-provider.outputs.cloud_provider }}
@@ -115,6 +117,8 @@ jobs:
   restore-drill:
     name: Execute DR Restore
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: prepare-drill
     
     steps:
@@ -260,6 +264,8 @@ jobs:
   report-drill:
     name: Generate DR Drill Report
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [prepare-drill, restore-drill]
     if: always()
     
