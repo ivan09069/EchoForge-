@@ -16,7 +16,11 @@ The resilience infrastructure provides:
 
 ### 1. Infrastructure as Code (Terraform)
 
-**Location**: `infra/aws/terraform/`
+**Multi-Cloud Terraform Modules**
+
+The backup infrastructure is implemented across three cloud providers with consistent security and lifecycle policies:
+
+#### AWS Infrastructure (`infra/aws/terraform/`)
 
 AWS infrastructure managed by Terraform:
 - **S3 Bucket**: Private, versioned backup storage
@@ -35,17 +39,64 @@ AWS infrastructure managed by Terraform:
 - Transition to GLACIER after 90 days
 - Expire noncurrent versions after 365 days
 
+#### Azure Infrastructure (`infra/azure/terraform/`)
+
+Azure infrastructure managed by Terraform:
+- **Resource Group**: Container for Azure resources (optional)
+- **Key Vault**: Secure storage for keys and secrets
+- **RSA Key**: Customer-managed key (CMK) for encryption
+- **Storage Account**: With system-assigned managed identity
+- **Blob Container**: Private container for backups
+- **Service Principal**: Azure AD app for CI/CD authentication
+
+**Security Features**:
+- Customer-managed key (CMK) encryption via Key Vault
+- System-assigned managed identity for Storage Account
+- Blob versioning and change feed enabled
+- Private container with no public access
+- Least-privilege service principal with Storage Blob Data Contributor role
+
+**Cost Optimization**:
+- Tier to Cool storage after 30 days
+- Tier to Archive storage after 90 days
+- Delete old versions after 365 days
+- Delete snapshots after 365 days
+
+#### GCP Infrastructure (`infra/gcp/terraform/`)
+
+GCP infrastructure managed by Terraform:
+- **KMS Key Ring**: Container for encryption keys
+- **KMS Crypto Key**: Customer-managed encryption key with 90-day rotation
+- **GCS Bucket**: Private, versioned backup storage with CMEK encryption
+- **Service Account**: Least-privilege access for backup operations
+
+**Security Features**:
+- Customer-managed encryption key (CMEK) via Cloud KMS
+- Automatic key rotation every 90 days
+- Uniform bucket-level access (no ACLs)
+- Versioning enabled for data protection
+- Service account with roles/storage.objectAdmin and roles/cloudkms.cryptoKeyEncrypterDecrypter
+
+**Cost Optimization**:
+- Transition to NEARLINE storage after 30 days
+- Transition to ARCHIVE storage after 90 days
+- Delete noncurrent versions after 365 days
+
 ### 2. Backup Scripts
 
 **Location**: `infra/`
 
 Multi-cloud backup scripts using git archive:
 
-- `aws-backup.sh`: Full AWS S3 implementation
-- `azure-backup.sh`: Placeholder for Azure Blob Storage
-- `gcp-backup.sh`: Placeholder for Google Cloud Storage
+- `aws-backup.sh`: AWS S3 backup with encryption
+- `azure-backup.sh`: Azure Blob Storage backup with authentication
+- `gcp-backup.sh`: Google Cloud Storage backup with service account
 
-Each script creates a timestamped tar.gz archive of the repository HEAD.
+Each script:
+- Creates a timestamped tar.gz archive of the repository HEAD
+- Uploads to the respective cloud storage service
+- Uses secure authentication (IAM user, service principal, or service account)
+- Validates environment variables before execution
 
 ### 3. GitHub Actions Workflows
 
@@ -58,10 +109,10 @@ Each script creates a timestamped tar.gz archive of the repository HEAD.
 - Manual: Workflow dispatch with parameters
 
 **Capabilities**:
-- **Backup**: Creates and uploads repository archive
-- **Restore**: Downloads and extracts specified backup
-- **Multi-cloud**: Supports AWS, Azure, GCP (extensible)
-- **Logging**: Pushes events to CloudWatch Logs
+- **Backup**: Creates and uploads repository archive to AWS, Azure, or GCP
+- **Restore**: Downloads and extracts specified backup from any cloud provider
+- **Multi-cloud**: Full support for AWS, Azure, and GCP with native authentication
+- **Logging**: Pushes events to CloudWatch Logs (AWS only)
 
 **Parameters** (manual dispatch):
 - `backup_source`: Cloud provider (aws/azure/gcp)
@@ -98,30 +149,60 @@ CloudWatch Logs integration for centralized logging:
 
 **Location**: `scripts/setup-gh-secrets.sh`
 
-Bootstrap script for GitHub Actions secrets:
-- Reads Terraform outputs automatically
-- Validates Terraform state exists
+Bootstrap script for GitHub Actions secrets across all cloud providers:
+- Reads Terraform outputs automatically from AWS, Azure, and GCP directories
+- Validates Terraform state exists for each cloud
 - Sets required secrets via GitHub CLI
-- Provides clear next steps
+- Provides clear next steps and configuration summary
+- Handles missing providers gracefully
 
-**Secrets Configured**:
+**AWS Secrets Configured**:
 - `AWS_REGION`: AWS region for operations
 - `AWS_ACCESS_KEY_ID`: IAM user access key
 - `AWS_SECRET_ACCESS_KEY`: IAM user secret key
-- `BACKUP_BUCKET`: S3 bucket name
-- `SLACK_WEBHOOK_URL`: Optional Slack webhook
+- `AWS_BACKUP_BUCKET`: S3 bucket name
+- `BACKUP_BUCKET`: Legacy name for backward compatibility
+
+**Azure Secrets Configured**:
+- `AZURE_CREDENTIALS`: JSON credentials for azure/login action (clientId, clientSecret, subscriptionId, tenantId)
+- `AZURE_STORAGE_ACCOUNT`: Storage account name
+- `AZURE_STORAGE_CONTAINER`: Blob container name
+
+**GCP Secrets Configured**:
+- `GCP_SA_KEY`: Service account key JSON for authentication
+- `GCP_PROJECT_ID`: GCP project ID
+- `GCS_BUCKET`: GCS bucket name
+
+**Optional**:
+- `SLACK_WEBHOOK_URL`: Slack webhook for notifications
 
 ## Deployment Guide
 
 ### Prerequisites
 
-- AWS account with admin access
-- Terraform >= 1.0
-- AWS CLI configured
+**General**:
 - GitHub CLI (gh) authenticated
+- Git configured with repository access
+- Terraform >= 1.0
+
+**AWS**:
+- AWS account with admin access
+- AWS CLI configured
 - Unique S3 bucket name
 
-### Step 1: Deploy Infrastructure
+**Azure** (Optional):
+- Azure subscription with admin access
+- Azure CLI installed and authenticated (`az login`)
+- Unique Key Vault name (3-24 chars)
+- Unique Storage Account name (3-24 chars, lowercase alphanumeric)
+
+**GCP** (Optional):
+- GCP project with admin access
+- gcloud CLI installed and authenticated (`gcloud auth login`)
+- Unique GCS bucket name
+- Required APIs enabled (Storage, KMS, IAM)
+
+### Step 1: Deploy AWS Infrastructure
 
 ```bash
 cd infra/aws/terraform
@@ -136,57 +217,148 @@ terraform plan
 terraform apply
 ```
 
-### Step 2: Configure GitHub Secrets
+### Step 2: Deploy Azure Infrastructure (Optional)
 
 ```bash
-# Set GITHUB_REPOSITORY_OWNER and GITHUB_REPOSITORY_NAME if not in repo
-export GITHUB_REPOSITORY_OWNER="your-org"
-export GITHUB_REPOSITORY_NAME="EchoForge"
+cd infra/azure/terraform
 
-# Run bootstrap script
+# Create terraform.tfvars with required values
+cat > terraform.tfvars <<TFVARS
+resource_group_name   = "echoforge-backup-rg"
+key_vault_name        = "echoforge-kv-unique"
+storage_account_name  = "echoforgestunique"
+container_name        = "backups"
+location              = "East US"
+TFVARS
+
+# Initialize and apply
+terraform init
+terraform plan
+terraform apply
+```
+
+**Note**: Key Vault and Storage Account names must be globally unique across all Azure customers.
+
+### Step 3: Deploy GCP Infrastructure (Optional)
+
+```bash
+cd infra/gcp/terraform
+
+# Create terraform.tfvars with required values
+cat > terraform.tfvars <<TFVARS
+project_id           = "your-gcp-project-id"
+bucket_name          = "echoforge-backup-unique-bucket"
+region               = "us-central1"
+TFVARS
+
+# Initialize and apply
+terraform init
+terraform plan
+terraform apply
+```
+
+**Note**: Ensure the following APIs are enabled in your GCP project:
+- Cloud Storage API
+- Cloud KMS API
+- Identity and Access Management (IAM) API
+
+### Step 4: Configure GitHub Secrets
+
+```bash
+# Run from repository root
+# The script will automatically detect and configure all deployed cloud providers
+
 ./scripts/setup-gh-secrets.sh
 
 # Optional: Add Slack webhook
 gh secret set SLACK_WEBHOOK_URL --repo your-org/EchoForge
 ```
 
-### Step 3: Test Backup Workflow
+The script will:
+- Detect which cloud providers have been deployed (AWS/Azure/GCP)
+- Read Terraform outputs from each provider
+- Set appropriate GitHub Actions secrets
+- Provide a summary and next steps
 
+### Step 5: Test Backup Workflows
+
+**Test AWS Backup**:
 ```bash
-# Trigger manual backup
 gh workflow run self-heal-agent.yml \
   --field backup_source=aws \
   --field operation=backup
 
-# Monitor workflow
-gh run list --workflow=self-heal-agent.yml
 gh run watch
 ```
 
-### Step 4: Verify Backup
-
+**Test Azure Backup** (if deployed):
 ```bash
-# List backups in S3
-aws s3 ls s3://your-bucket-name/
+gh workflow run self-heal-agent.yml \
+  --field backup_source=azure \
+  --field operation=backup
 
-# Check CloudWatch logs
-aws logs tail /echoforge/workflows --since 1h
+gh run watch
+```
+
+**Test GCP Backup** (if deployed):
+```bash
+gh workflow run self-heal-agent.yml \
+  --field backup_source=gcp \
+  --field operation=backup
+
+gh run watch
+```
+
+### Step 6: Verify Backups
+
+**AWS**:
+```bash
+aws s3 ls s3://your-bucket-name/
+```
+
+**Azure**:
+```bash
+az storage blob list \
+  --account-name your-storage-account \
+  --container-name backups \
+  --output table
+```
+
+**GCP**:
+```bash
+gsutil ls gs://your-bucket-name/
 ```
 
 ## Operational Procedures
 
 ### Performing a Backup
 
-**Automated**: Backups run weekly on Sunday at 3 AM UTC automatically.
+**Automated**: Backups run weekly on Sunday at 3 AM UTC automatically (AWS only).
 
-**Manual**:
+**Manual AWS Backup**:
 ```bash
 gh workflow run self-heal-agent.yml \
   --field backup_source=aws \
   --field operation=backup
 ```
 
+**Manual Azure Backup**:
+```bash
+gh workflow run self-heal-agent.yml \
+  --field backup_source=azure \
+  --field operation=backup
+```
+
+**Manual GCP Backup**:
+```bash
+gh workflow run self-heal-agent.yml \
+  --field backup_source=gcp \
+  --field operation=backup
+```
+
 ### Restoring from Backup
+
+#### AWS Restore
 
 1. List available backups:
    ```bash
@@ -201,7 +373,40 @@ gh workflow run self-heal-agent.yml \
      --field filename=echoforge-backup-20231115_030000.tar.gz
    ```
 
-3. The workflow will download, verify, and extract the backup.
+#### Azure Restore
+
+1. List available backups:
+   ```bash
+   az storage blob list \
+     --account-name your-storage-account \
+     --container-name backups \
+     --output table
+   ```
+
+2. Trigger restore workflow:
+   ```bash
+   gh workflow run self-heal-agent.yml \
+     --field backup_source=azure \
+     --field operation=restore \
+     --field filename=echoforge-backup-20231115_030000.tar.gz
+   ```
+
+#### GCP Restore
+
+1. List available backups:
+   ```bash
+   gsutil ls gs://your-bucket-name/
+   ```
+
+2. Trigger restore workflow:
+   ```bash
+   gh workflow run self-heal-agent.yml \
+     --field backup_source=gcp \
+     --field operation=restore \
+     --field filename=echoforge-backup-20231115_030000.tar.gz
+   ```
+
+**Note**: The workflow will download, verify, and extract the backup to `/tmp/restore/` in the GitHub Actions runner.
 
 ### Monitoring Operations
 
@@ -231,16 +436,40 @@ gh run view <run-id>
 
 #### Backup Fails
 
+**AWS**:
 1. Check GitHub Actions logs: `gh run view <run-id> --log-failed`
 2. Verify AWS credentials are set correctly
 3. Confirm S3 bucket exists and is accessible
 4. Check IAM permissions for backup user
 
+**Azure**:
+1. Check GitHub Actions logs: `gh run view <run-id> --log-failed`
+2. Verify Azure credentials (service principal) are correct
+3. Confirm Storage Account and container exist
+4. Check RBAC permissions for service principal
+
+**GCP**:
+1. Check GitHub Actions logs: `gh run view <run-id> --log-failed`
+2. Verify GCP service account key is valid
+3. Confirm GCS bucket exists and is accessible
+4. Check IAM roles for service account
+
 #### Restore Fails
 
+**AWS**:
 1. Verify filename exists in S3 bucket
 2. Check archive integrity locally: `tar -tzf backup.tar.gz`
 3. Ensure sufficient IAM permissions for S3 GetObject
+
+**Azure**:
+1. Verify filename exists in Azure Blob Storage
+2. Check archive integrity after download
+3. Ensure service principal has Storage Blob Data Reader role
+
+**GCP**:
+1. Verify filename exists in GCS bucket
+2. Check archive integrity after download
+3. Ensure service account has storage.objectViewer role
 
 #### No Slack Notifications
 
@@ -267,79 +496,120 @@ gh run view <run-id>
 
 **Purpose**: Ensure infrastructure health and security compliance
 
-**Checklist**:
+**Multi-Cloud Checklist**:
+
+**AWS**:
 - [ ] Review CloudWatch logs for anomalies
 - [ ] Verify backup schedule is executing successfully
 - [ ] Check S3 bucket lifecycle transitions
 - [ ] Audit IAM user permissions (no unnecessary access)
 - [ ] Review AWS costs (lifecycle rules working)
+- [ ] Verify KMS key rotation is enabled
+- [ ] Check for Terraform drift: `cd infra/aws/terraform && terraform plan`
+
+**Azure** (if deployed):
+- [ ] Check Azure Storage Account metrics
+- [ ] Verify lifecycle management policies are working
+- [ ] Audit service principal permissions
+- [ ] Review Azure costs (storage tiers)
+- [ ] Verify Key Vault access policies
+- [ ] Check for Terraform drift: `cd infra/azure/terraform && terraform plan`
+
+**GCP** (if deployed):
+- [ ] Check GCS bucket metrics
+- [ ] Verify lifecycle policies are working
+- [ ] Audit service account IAM roles
+- [ ] Review GCP costs (storage classes)
+- [ ] Verify KMS key rotation
+- [ ] Check for Terraform drift: `cd infra/gcp/terraform && terraform plan`
+
+**General**:
 - [ ] Confirm GitHub Actions secrets are valid
 - [ ] Test Slack notifications
-- [ ] Verify KMS key rotation is enabled
-- [ ] Check for Terraform drift: `terraform plan`
+- [ ] Verify all backup workflows are functional
 
 **Schedule**: First Monday of each month
 
 ### Security Considerations
 
 1. **Credentials**: Never commit secrets to version control
-2. **IAM**: Use least-privilege principle for all access
-3. **Encryption**: All backups encrypted at rest with KMS
-4. **Versioning**: Enabled to protect against accidental deletions
-5. **Access Logs**: Consider enabling S3 access logging for audit
-6. **MFA**: Enable MFA delete on S3 bucket for production
-7. **Key Rotation**: KMS key rotation enabled automatically
+2. **Least Privilege**: Use least-privilege principle for all access (IAM users, service principals, service accounts)
+3. **Encryption**: All backups encrypted at rest with customer-managed keys (CMK/CMEK)
+4. **Versioning**: Enabled on all storage to protect against accidental deletions
+5. **Access Logs**: Consider enabling access logging for audit trails (S3, Azure Storage, GCS)
+6. **MFA**: Enable MFA delete on production buckets where supported
+7. **Key Rotation**: 
+   - AWS: KMS key rotation enabled automatically
+   - Azure: Manual key rotation recommended annually
+   - GCP: Automatic rotation every 90 days
+8. **Private Storage**: All buckets/containers are private with no public access
+9. **Identity**: Use managed identities and service accounts instead of long-lived credentials where possible
 
 ### Cost Management
 
-**Expected Monthly Costs** (approximate):
+**Expected Monthly Costs** (approximate per cloud provider):
+
+**AWS**:
 - S3 Storage (STANDARD): $0.023/GB
 - S3 Storage (STANDARD_IA): $0.0125/GB after 30 days
 - S3 Storage (GLACIER): $0.004/GB after 90 days
 - KMS Key: $1/month
 - KMS Requests: ~$0.03/10,000 requests
 
+**Azure**:
+- Storage (Hot): $0.018/GB
+- Storage (Cool): $0.01/GB after 30 days
+- Storage (Archive): $0.002/GB after 90 days
+- Key Vault Key: $1/month for RSA 2048-bit key
+- Storage transactions: minimal cost for infrequent access
+
+**GCP**:
+- Storage (Standard): $0.020/GB
+- Storage (Nearline): $0.010/GB after 30 days
+- Storage (Archive): $0.0012/GB after 90 days
+- KMS Key: $0.06/month per active key
+- KMS Operations: $0.03/10,000 operations
+
 **Optimization Tips**:
-- Lifecycle rules automatically reduce costs
+- Lifecycle rules automatically reduce costs across all providers
 - Delete old backups manually if over 1 year old
-- Monitor S3 storage metrics in AWS Cost Explorer
-- Consider using S3 Intelligent-Tiering for unpredictable access
+- Monitor storage metrics in each cloud provider's cost management tool
+- Consider using intelligent tiering where available
+- Use a single provider for primary backups and others for DR if cost is a concern
 
 ## Future Enhancements
-
-### Azure Implementation
-
-Planned infrastructure (not yet implemented):
-- Azure Blob Storage with encryption
-- Azure Key Vault for secrets
-- Service Principal with RBAC
-- Terraform module for Azure resources
-
-### GCP Implementation
-
-Planned infrastructure (not yet implemented):
-- Google Cloud Storage with encryption
-- Cloud KMS for key management
-- Service Account with IAM roles
-- Terraform module for GCP resources
 
 ### Additional Features
 
 Consider adding:
-- Cross-region replication for AWS
-- Backup retention policies
-- Automated backup testing
-- Performance metrics dashboard
-- Cost alerting thresholds
-- Multi-region disaster recovery
+- **Cross-region replication** for all cloud providers for geographical redundancy
+- **Backup retention policies** with automatic cleanup based on age and importance
+- **Automated backup testing** to validate backup integrity on a schedule
+- **Performance metrics dashboard** to track backup/restore times and success rates
+- **Cost alerting thresholds** to monitor and control multi-cloud storage expenses
+- **Multi-region disaster recovery** with automated failover capabilities
+- **Backup encryption verification** to ensure data integrity
+- **Compliance reporting** for audit and regulatory requirements
+- **Backup deduplication** to reduce storage costs across multiple backups
 
 ## Support and Maintenance
 
 ### Documentation
 
-- Infrastructure: `infra/aws/terraform/README.md`
-- Terraform variables: `infra/aws/terraform/terraform.tfvars.example`
+**Infrastructure Documentation**:
+- AWS: `infra/aws/terraform/` - S3, KMS, IAM configuration
+- Azure: `infra/azure/terraform/` - Storage Account, Key Vault, Service Principal
+- GCP: `infra/gcp/terraform/` - GCS, Cloud KMS, Service Account
 - This document: `docs/resilience-architecture.md`
+
+**Backup Scripts**:
+- `infra/aws-backup.sh` - AWS backup implementation
+- `infra/azure-backup.sh` - Azure backup implementation
+- `infra/gcp-backup.sh` - GCP backup implementation
+
+**Configuration**:
+- `scripts/setup-gh-secrets.sh` - Multi-cloud secrets setup
+- `.github/workflows/self-heal-agent.yml` - Backup/restore workflow
 
 ### Contacts
 
@@ -351,8 +621,13 @@ For issues or questions:
 
 ### Version History
 
-- v1.0 (Initial): AWS implementation with backup/restore
-- Future: Azure and GCP extensions
+- **v2.0 (Current)**: Multi-cloud implementation with AWS, Azure, and GCP
+  - Added Azure Terraform module with Key Vault and Storage Account
+  - Added GCP Terraform module with Cloud KMS and GCS
+  - Updated backup scripts for Azure and GCP
+  - Enhanced setup script for multi-cloud configuration
+  - Updated workflow with native cloud authentication
+- **v1.0**: Initial AWS implementation with backup/restore
 
 ---
 
