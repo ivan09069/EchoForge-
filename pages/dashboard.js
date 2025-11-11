@@ -1,4 +1,5 @@
 import Head from 'next/head'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import Dashboard from '../components/Dashboard'
 import PriceFeed from '../components/PriceFeed'
@@ -62,7 +63,7 @@ export default function DashboardPage() {
         </Head>
         <main className="main">
           <h1>Access Denied</h1>
-          <p>Please <a href="/login">login</a> to view your dashboard.</p>
+          <p>Please <Link href="/login">login</Link> to view your dashboard.</p>
         </main>
       </div>
     )

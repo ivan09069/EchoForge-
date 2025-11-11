@@ -1,5 +1,6 @@
 import Head from 'next/head'
 import Link from 'next/link'
+import Image from 'next/image'
 
 export default function Home() {
   return (
@@ -52,6 +53,7 @@ export default function Home() {
 
         <div className="architecture">
           <h2>System Architecture</h2>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/architecture.svg" alt="EchoForge Architecture" className="architecture-diagram" />
         </div>
       </main>

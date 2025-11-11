@@ -160,7 +160,7 @@ export default function Dashboard({ portfolioData, onDataUpdate }) {
             </table>
           ) : (
             <p className="empty-message">
-              No assets yet. Click "Add Asset" to get started.
+              No assets yet. Click &quot;Add Asset&quot; to get started.
             </p>
           )}
         </div>
