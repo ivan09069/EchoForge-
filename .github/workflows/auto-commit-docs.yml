@@ -24,7 +24,17 @@ jobs:
           mkdir -p docs
           echo "Last updated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > docs/LAST_UPDATED.md
 
+      - name: Check for changes in docs
+        id: check_changes
+        run: |
+          if [[ -n "$(git status --porcelain docs/)" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Commit & Push changes
+        if: steps.check_changes.outputs.changed == 'true'
         uses: EndBug/add-and-commit@v9
         with:
           author_name: EchoForge Automation
