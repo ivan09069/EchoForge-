@@ -74,17 +74,26 @@ jobs:
         if: >-
           ${{ github.event_name == 'workflow_dispatch' &&
               inputs.backup_source == 'azure' }}
+        env:
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+          AZURE_CONTAINER_NAME: ${{ secrets.AZURE_CONTAINER_NAME }}
         run: |
-          echo "Azure backup placeholder - implementation pending"
           bash infra/azure-backup.sh
 
       - name: Execute GCP backup
         if: >-
           ${{ github.event_name == 'workflow_dispatch' &&
               inputs.backup_source == 'gcp' }}
+        env:
+          GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
         run: |
-          echo "GCP backup placeholder - implementation pending"
+          # Setup GCP credentials
+          echo "${{ secrets.GCP_CREDENTIALS }}" | base64 -d > /tmp/gcp-key.json
           bash infra/gcp-backup.sh
+          rm -f /tmp/gcp-key.json
 
       - name: Log to CloudWatch
         if: >-
@@ -166,15 +175,108 @@ jobs:
 
       - name: Restore from Azure
         if: ${{ inputs.backup_source == 'azure' }}
+        env:
+          AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
+          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
+          AZURE_CONTAINER_NAME: ${{ secrets.AZURE_CONTAINER_NAME }}
         run: |
-          echo "Azure restore placeholder - implementation pending"
-          echo "Would restore: ${{ inputs.filename }}"
+          echo "========================================="
+          echo "EchoForge Restore from Azure"
+          echo "========================================="
+          echo "Filename: ${{ inputs.filename }}"
+          echo "Container: ${AZURE_CONTAINER_NAME}"
+          echo "========================================="
+
+          FNAME="${{ inputs.filename }}"
+
+          # Download backup from Azure Blob Storage
+          echo "Downloading backup from Azure..."
+          if command -v az &> /dev/null; then
+            az storage blob download \
+              --account-name "${AZURE_STORAGE_ACCOUNT}" \
+              --account-key "${AZURE_STORAGE_KEY}" \
+              --container-name "${AZURE_CONTAINER_NAME}" \
+              --name "${FNAME}" \
+              --file "/tmp/${FNAME}"
+          else
+            echo "Error: Azure CLI not available"
+            exit 1
+          fi
+
+          # Verify archive
+          echo "Verifying archive integrity..."
+          if ! tar -tzf "/tmp/${FNAME}" > /dev/null; then
+            echo "Error: Archive verification failed"
+            exit 1
+          fi
+
+          # Extract archive
+          echo "Extracting archive..."
+          mkdir -p /tmp/restore
+          tar -xzf "/tmp/${FNAME}" -C /tmp/restore
+
+          echo "========================================="
+          echo "Restore completed successfully!"
+          echo "Files extracted to: /tmp/restore/"
+          echo "========================================="
+
+          # List restored files
+          echo "Restored contents:"
+          ls -la /tmp/restore/
 
       - name: Restore from GCP
         if: ${{ inputs.backup_source == 'gcp' }}
+        env:
+          GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
         run: |
-          echo "GCP restore placeholder - implementation pending"
-          echo "Would restore: ${{ inputs.filename }}"
+          echo "========================================="
+          echo "EchoForge Restore from GCP"
+          echo "========================================="
+          echo "Filename: ${{ inputs.filename }}"
+          echo "Bucket: ${GCP_BUCKET_NAME}"
+          echo "========================================="
+
+          # Setup GCP credentials
+          echo "${{ secrets.GCP_CREDENTIALS }}" | base64 -d > /tmp/gcp-key.json
+
+          FNAME="${{ inputs.filename }}"
+
+          # Download backup from Google Cloud Storage
+          echo "Downloading backup from GCS..."
+          if command -v gsutil &> /dev/null; then
+            gsutil cp "gs://${GCP_BUCKET_NAME}/${FNAME}" "/tmp/${FNAME}"
+          elif command -v gcloud &> /dev/null; then
+            gcloud storage cp "gs://${GCP_BUCKET_NAME}/${FNAME}" "/tmp/${FNAME}"
+          else
+            echo "Error: Neither gsutil nor gcloud is available"
+            exit 1
+          fi
+
+          # Cleanup credentials
+          rm -f /tmp/gcp-key.json
+
+          # Verify archive
+          echo "Verifying archive integrity..."
+          if ! tar -tzf "/tmp/${FNAME}" > /dev/null; then
+            echo "Error: Archive verification failed"
+            exit 1
+          fi
+
+          # Extract archive
+          echo "Extracting archive..."
+          mkdir -p /tmp/restore
+          tar -xzf "/tmp/${FNAME}" -C /tmp/restore
+
+          echo "========================================="
+          echo "Restore completed successfully!"
+          echo "Files extracted to: /tmp/restore/"
+          echo "========================================="
+
+          # List restored files
+          echo "Restored contents:"
+          ls -la /tmp/restore/
 
       - name: Log to CloudWatch
         if: ${{ always() && inputs.backup_source == 'aws' }}

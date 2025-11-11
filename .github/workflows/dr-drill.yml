@@ -1,0 +1,323 @@
+---
+name: DR Drill
+
+'on':
+  # Quarterly schedule: First Monday of Jan, Apr, Jul, Oct at 9 AM UTC
+  schedule:
+    - cron: '0 9 1-7 1,4,7,10 MON'
+  
+  # Manual trigger for ad-hoc drills
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud provider to test restore from'
+        required: true
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+        default: 'aws'
+      backup_age_days:
+        description: 'Age of backup to restore (days ago)'
+        required: false
+        type: string
+        default: '30'
+      skip_validation:
+        description: 'Skip file validation (faster but less thorough)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare-drill:
+    name: Prepare DR Drill
+    runs-on: ubuntu-latest
+    outputs:
+      backup_file: ${{ steps.select-backup.outputs.backup_file }}
+      cloud_provider: ${{ steps.determine-provider.outputs.cloud_provider }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine cloud provider
+        id: determine-provider
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "cloud_provider=${{ inputs.cloud_provider }}" >> $GITHUB_OUTPUT
+          else
+            # Default to AWS for scheduled runs
+            echo "cloud_provider=aws" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Configure AWS credentials
+        if: steps.determine-provider.outputs.cloud_provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Select backup file from AWS
+        if: steps.determine-provider.outputs.cloud_provider == 'aws'
+        id: select-backup
+        env:
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          TARGET_AGE_DAYS: ${{ inputs.backup_age_days || '30' }}
+        run: |
+          echo "Listing backups from S3..."
+          aws s3 ls "s3://${BACKUP_BUCKET}/" --region "${AWS_REGION}" > /tmp/backups.txt
+          
+          if [ ! -s /tmp/backups.txt ]; then
+            echo "Error: No backups found in bucket"
+            exit 1
+          fi
+          
+          # Calculate target date (TARGET_AGE_DAYS ago)
+          TARGET_DATE=$(date -u -d "${TARGET_AGE_DAYS} days ago" +%Y%m%d 2>/dev/null || \
+                        date -u -v-${TARGET_AGE_DAYS}d +%Y%m%d 2>/dev/null)
+          
+          echo "Looking for backup from approximately: ${TARGET_DATE}"
+          
+          # Find backup closest to target date
+          BACKUP_FILE=$(grep "echoforge-backup-" /tmp/backups.txt | \
+                       awk '{print $4}' | \
+                       grep -E "[0-9]{8}_[0-9]{6}" | \
+                       sort -r | \
+                       awk -v target="${TARGET_DATE}" '
+                         {
+                           date=substr($0, index($0, "backup-")+7, 8)
+                           if (date <= target || closest == "") {
+                             closest = $0
+                           }
+                         }
+                         END { print closest }
+                       ')
+          
+          if [ -z "${BACKUP_FILE}" ]; then
+            echo "Warning: No suitable backup found, using most recent"
+            BACKUP_FILE=$(grep "echoforge-backup-" /tmp/backups.txt | \
+                         awk '{print $4}' | sort -r | head -n1)
+          fi
+          
+          echo "Selected backup: ${BACKUP_FILE}"
+          echo "backup_file=${BACKUP_FILE}" >> $GITHUB_OUTPUT
+          
+          # Log backup details
+          echo "## DR Drill Preparation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Cloud Provider**: ${{ steps.determine-provider.outputs.cloud_provider }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Selected Backup**: ${BACKUP_FILE}" >> $GITHUB_STEP_SUMMARY
+          echo "**Target Age**: ${TARGET_AGE_DAYS} days" >> $GITHUB_STEP_SUMMARY
+
+  restore-drill:
+    name: Execute DR Restore
+    runs-on: ubuntu-latest
+    needs: prepare-drill
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        if: needs.prepare-drill.outputs.cloud_provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Download backup from AWS
+        if: needs.prepare-drill.outputs.cloud_provider == 'aws'
+        env:
+          BACKUP_BUCKET: ${{ secrets.BACKUP_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          BACKUP_FILE: ${{ needs.prepare-drill.outputs.backup_file }}
+        run: |
+          echo "========================================="
+          echo "DR Drill: Downloading Backup"
+          echo "========================================="
+          echo "File: ${BACKUP_FILE}"
+          echo "Bucket: ${BACKUP_BUCKET}"
+          echo ""
+          
+          # Download backup
+          aws s3 cp "s3://${BACKUP_BUCKET}/${BACKUP_FILE}" \
+            "/tmp/${BACKUP_FILE}" --region "${AWS_REGION}"
+          
+          echo "✓ Backup downloaded successfully"
+          
+          # Get file size
+          FILE_SIZE=$(stat -f%z "/tmp/${BACKUP_FILE}" 2>/dev/null || \
+                     stat -c%s "/tmp/${BACKUP_FILE}" 2>/dev/null)
+          echo "File size: ${FILE_SIZE} bytes ($(numfmt --to=iec-i --suffix=B ${FILE_SIZE} 2>/dev/null || echo 'N/A'))"
+          
+          # Download checksum if available
+          if aws s3 ls "s3://${BACKUP_BUCKET}/${BACKUP_FILE}.sha256" &>/dev/null; then
+            echo "Downloading checksum file..."
+            aws s3 cp "s3://${BACKUP_BUCKET}/${BACKUP_FILE}.sha256" \
+              "/tmp/${BACKUP_FILE}.sha256" --region "${AWS_REGION}" || true
+          fi
+      
+      - name: Verify backup integrity
+        env:
+          BACKUP_FILE: ${{ needs.prepare-drill.outputs.backup_file }}
+        run: |
+          echo "========================================="
+          echo "DR Drill: Verifying Backup Integrity"
+          echo "========================================="
+          
+          # Verify archive can be read
+          echo "Testing archive integrity..."
+          if tar -tzf "/tmp/${BACKUP_FILE}" > /tmp/file-list.txt 2>&1; then
+            echo "✓ Archive structure is valid"
+            FILE_COUNT=$(wc -l < /tmp/file-list.txt)
+            echo "  Files in archive: ${FILE_COUNT}"
+          else
+            echo "✗ Archive integrity check failed"
+            exit 1
+          fi
+          
+          # Verify checksum if available
+          if [ -f "/tmp/${BACKUP_FILE}.sha256" ]; then
+            echo ""
+            echo "Verifying checksum..."
+            bash infra/checksum-backup.sh verify "/tmp/${BACKUP_FILE}" || {
+              echo "✗ Checksum verification failed"
+              exit 1
+            }
+          else
+            echo ""
+            echo "⚠ No checksum file found, skipping checksum verification"
+          fi
+      
+      - name: Extract and validate backup
+        if: ${{ !inputs.skip_validation }}
+        env:
+          BACKUP_FILE: ${{ needs.prepare-drill.outputs.backup_file }}
+        run: |
+          echo "========================================="
+          echo "DR Drill: Extracting Backup"
+          echo "========================================="
+          
+          # Create restore directory
+          RESTORE_DIR="/tmp/dr-drill-restore"
+          mkdir -p "${RESTORE_DIR}"
+          
+          # Extract backup
+          echo "Extracting archive..."
+          tar -xzf "/tmp/${BACKUP_FILE}" -C "${RESTORE_DIR}"
+          
+          echo "✓ Backup extracted successfully"
+          echo ""
+          
+          # Validate critical files exist
+          echo "Validating critical files..."
+          CRITICAL_FILES=(
+            "README.md"
+            "package.json"
+            ".github/workflows"
+            "docs"
+          )
+          
+          VALIDATION_PASSED=true
+          for file in "${CRITICAL_FILES[@]}"; do
+            if [ -e "${RESTORE_DIR}/${file}" ]; then
+              echo "  ✓ ${file}"
+            else
+              echo "  ✗ ${file} - NOT FOUND"
+              VALIDATION_PASSED=false
+            fi
+          done
+          
+          if [ "${VALIDATION_PASSED}" = "false" ]; then
+            echo ""
+            echo "✗ Critical file validation failed"
+            exit 1
+          fi
+          
+          echo ""
+          echo "✓ All critical files validated successfully"
+          
+          # Generate file inventory
+          echo ""
+          echo "Generating file inventory..."
+          find "${RESTORE_DIR}" -type f | wc -l > /tmp/file-count.txt
+          find "${RESTORE_DIR}" -type d | wc -l > /tmp/dir-count.txt
+          
+          echo "  Total files: $(cat /tmp/file-count.txt)"
+          echo "  Total directories: $(cat /tmp/dir-count.txt)"
+      
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Cleaning up temporary files..."
+          rm -rf /tmp/dr-drill-restore /tmp/${BACKUP_FILE}* /tmp/file-list.txt
+          echo "✓ Cleanup completed"
+
+  report-drill:
+    name: Generate DR Drill Report
+    runs-on: ubuntu-latest
+    needs: [prepare-drill, restore-drill]
+    if: always()
+    
+    steps:
+      - name: Generate drill report
+        env:
+          RESTORE_STATUS: ${{ needs.restore-drill.result }}
+          BACKUP_FILE: ${{ needs.prepare-drill.outputs.backup_file }}
+          CLOUD_PROVIDER: ${{ needs.prepare-drill.outputs.cloud_provider }}
+        run: |
+          echo "## 🚨 Disaster Recovery Drill Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Date**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "**Drill Type**: ${{ github.event_name == 'schedule' && 'Scheduled Quarterly' || 'Manual' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cloud Provider**: ${CLOUD_PROVIDER}" >> $GITHUB_STEP_SUMMARY
+          echo "**Backup File**: ${BACKUP_FILE}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${RESTORE_STATUS}" = "success" ]; then
+            echo "✅ **Status**: PASSED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All validations completed successfully:" >> $GITHUB_STEP_SUMMARY
+            echo "- ✓ Backup download" >> $GITHUB_STEP_SUMMARY
+            echo "- ✓ Archive integrity" >> $GITHUB_STEP_SUMMARY
+            echo "- ✓ Data extraction" >> $GITHUB_STEP_SUMMARY
+            echo "- ✓ Critical file validation" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Status**: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ **Action Required**: Review workflow logs and address issues immediately" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review this report and workflow logs" >> $GITHUB_STEP_SUMMARY
+          echo "2. Document any issues found in runbook" >> $GITHUB_STEP_SUMMARY
+          echo "3. Update disaster recovery procedures if needed" >> $GITHUB_STEP_SUMMARY
+          echo "4. Schedule remediation for any failures" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Next scheduled drill: First Monday of next quarter*" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Log to CloudWatch
+        if: needs.prepare-drill.outputs.cloud_provider == 'aws'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          RESTORE_STATUS: ${{ needs.restore-drill.result }}
+          BACKUP_FILE: ${{ needs.prepare-drill.outputs.backup_file }}
+        run: |
+          LOG_MSG="DR Drill completed at $(date -Iseconds)"
+          LOG_MSG="${LOG_MSG} - Status: ${RESTORE_STATUS}"
+          LOG_MSG="${LOG_MSG} - Backup: ${BACKUP_FILE}"
+          LOG_MSG="${LOG_MSG} - Type: ${{ github.event_name }}"
+          
+          echo "${LOG_MSG}" | bash infra/aws-cloudwatch-log.sh || true

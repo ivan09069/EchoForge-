@@ -1,0 +1,277 @@
+---
+name: Auto Deploy Resilience
+
+'on':
+  # Manual trigger for infrastructure deployment
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud provider to deploy'
+        required: true
+        type: choice
+        options:
+          - aws
+          - azure
+          - gcp
+          - all
+        default: 'aws'
+      terraform_action:
+        description: 'Terraform action to perform'
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+        default: 'plan'
+      auto_approve:
+        description: 'Auto-approve Terraform apply (use with caution)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  deploy-aws:
+    name: Deploy AWS Infrastructure
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ inputs.cloud_provider == 'aws' || inputs.cloud_provider == 'all' }}
+    
+    env:
+      TF_DIR: infra/aws/terraform
+      AWS_REGION: ${{ secrets.AWS_REGION || 'us-west-2' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.0"
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+      
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        if: >-
+          ${{ inputs.terraform_action == 'apply' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform apply -auto-approve tfplan
+          else
+            echo "Manual approval required. Set auto_approve to true or apply manually."
+            exit 1
+          fi
+      
+      - name: Terraform Destroy
+        if: >-
+          ${{ inputs.terraform_action == 'destroy' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform destroy -auto-approve
+          else
+            echo "Manual approval required. Set auto_approve to true or destroy manually."
+            exit 1
+          fi
+      
+      - name: Setup GitHub Secrets
+        if: >-
+          ${{ inputs.terraform_action == 'apply' && success() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "AWS infrastructure deployed successfully"
+          echo "Run scripts/setup-gh-secrets.sh locally to configure GitHub secrets"
+          echo "Or set secrets manually from Terraform outputs"
+
+  deploy-azure:
+    name: Deploy Azure Infrastructure
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ inputs.cloud_provider == 'azure' || inputs.cloud_provider == 'all' }}
+    
+    env:
+      TF_DIR: infra/azure/terraform
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.0"
+      
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+      
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        if: >-
+          ${{ inputs.terraform_action == 'apply' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform apply -auto-approve tfplan
+          else
+            echo "Manual approval required. Set auto_approve to true or apply manually."
+            exit 1
+          fi
+      
+      - name: Terraform Destroy
+        if: >-
+          ${{ inputs.terraform_action == 'destroy' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform destroy -auto-approve
+          else
+            echo "Manual approval required. Set auto_approve to true or destroy manually."
+            exit 1
+          fi
+      
+      - name: Output Secrets Information
+        if: >-
+          ${{ inputs.terraform_action == 'apply' && success() }}
+        run: |
+          echo "Azure infrastructure deployed successfully"
+          echo "Configure GitHub secrets with Terraform outputs"
+
+  deploy-gcp:
+    name: Deploy GCP Infrastructure
+    runs-on: ubuntu-latest
+    if: >-
+      ${{ inputs.cloud_provider == 'gcp' || inputs.cloud_provider == 'all' }}
+    
+    env:
+      TF_DIR: infra/gcp/terraform
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~> 1.0"
+      
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+      
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+      
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+      
+      - name: Terraform Validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+      
+      - name: Terraform Plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan -out=tfplan
+      
+      - name: Terraform Apply
+        if: >-
+          ${{ inputs.terraform_action == 'apply' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform apply -auto-approve tfplan
+          else
+            echo "Manual approval required. Set auto_approve to true or apply manually."
+            exit 1
+          fi
+      
+      - name: Terraform Destroy
+        if: >-
+          ${{ inputs.terraform_action == 'destroy' }}
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          if [ "${{ inputs.auto_approve }}" = "true" ]; then
+            terraform destroy -auto-approve
+          else
+            echo "Manual approval required. Set auto_approve to true or destroy manually."
+            exit 1
+          fi
+      
+      - name: Output Secrets Information
+        if: >-
+          ${{ inputs.terraform_action == 'apply' && success() }}
+        run: |
+          echo "GCP infrastructure deployed successfully"
+          echo "Configure GitHub secrets with Terraform outputs"
+
+  summary:
+    name: Deployment Summary
+    runs-on: ubuntu-latest
+    needs: [deploy-aws, deploy-azure, deploy-gcp]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Infrastructure Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Action**: ${{ inputs.terraform_action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Cloud Provider**: ${{ inputs.cloud_provider }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Auto Approve**: ${{ inputs.auto_approve }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy-aws.result }}" != "skipped" ]; then
+            echo "- AWS: ${{ needs.deploy-aws.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.deploy-azure.result }}" != "skipped" ]; then
+            echo "- Azure: ${{ needs.deploy-azure.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ "${{ needs.deploy-gcp.result }}" != "skipped" ]; then
+            echo "- GCP: ${{ needs.deploy-gcp.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.terraform_action }}" = "apply" ]; then
+            echo "1. Run \`scripts/setup-gh-secrets.sh\` to configure GitHub secrets" >> $GITHUB_STEP_SUMMARY
+            echo "2. Verify secrets: \`gh secret list\`" >> $GITHUB_STEP_SUMMARY
+            echo "3. Test backup workflow: \`gh workflow run self-heal-agent.yml\`" >> $GITHUB_STEP_SUMMARY
+          fi
