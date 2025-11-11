@@ -1,0 +1,1 @@
+<content of CODE_OF_CONDUCT.md>
