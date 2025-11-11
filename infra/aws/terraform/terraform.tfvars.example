@@ -1,0 +1,14 @@
+# EchoForge Backup Infrastructure - Example terraform.tfvars
+# Copy this file to terraform.tfvars and customize values
+
+# Required: Globally unique S3 bucket name
+# bucket_name = "echoforge-backups-your-unique-suffix"
+
+# Optional: Override default region
+# aws_region = "us-west-2"
+
+# Optional: Override environment tag
+# environment = "production"
+
+# Optional: Override project name tag
+# project_name = "echoforge"
