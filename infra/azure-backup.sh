@@ -1,6 +1,6 @@
 #!/bin/bash
 # EchoForge Azure Backup Script
-# Placeholder for future Azure Blob Storage implementation
+# Archives the current repository and uploads to Azure Blob Storage
 
 set -euo pipefail
 
@@ -9,6 +9,10 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILENAME="echoforge-backup-${TIMESTAMP}.tar.gz"
 TEMP_DIR=$(mktemp -d)
 
+# Required environment variables
+: "${AZURE_STORAGE_ACCOUNT:?AZURE_STORAGE_ACCOUNT must be set}"
+: "${AZURE_STORAGE_CONTAINER:?AZURE_STORAGE_CONTAINER must be set}"
+
 # Cleanup function
 cleanup() {
   rm -rf "${TEMP_DIR}"
@@ -16,9 +20,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "========================================="
-echo "EchoForge Azure Backup (Placeholder)"
+echo "EchoForge Azure Backup"
 echo "========================================="
 echo "Timestamp: ${TIMESTAMP}"
+echo "Storage Account: ${AZURE_STORAGE_ACCOUNT}"
+echo "Container: ${AZURE_STORAGE_CONTAINER}"
 echo "========================================="
 
 # Create git archive of current HEAD
@@ -29,21 +35,16 @@ git archive --format=tar.gz --prefix=echoforge/ HEAD > "${TEMP_DIR}/${BACKUP_FIL
 ARCHIVE_SIZE=$(du -h "${TEMP_DIR}/${BACKUP_FILENAME}" | cut -f1)
 echo "Archive created: ${BACKUP_FILENAME} (${ARCHIVE_SIZE})"
 
-echo "========================================="
-echo "Azure backup implementation pending"
-echo "TODO: Upload to Azure Blob Storage"
-echo "Required environment variables:"
-echo "  - AZURE_STORAGE_ACCOUNT"
-echo "  - AZURE_STORAGE_KEY"
-echo "  - AZURE_CONTAINER_NAME"
-echo "========================================="
+# Upload to Azure Blob Storage
+echo "Uploading to Azure Blob Storage..."
+az storage blob upload \
+  --account-name "${AZURE_STORAGE_ACCOUNT}" \
+  --container-name "${AZURE_STORAGE_CONTAINER}" \
+  --name "${BACKUP_FILENAME}" \
+  --file "${TEMP_DIR}/${BACKUP_FILENAME}" \
+  --no-progress
 
-# Future implementation:
-# az storage blob upload \
-#   --account-name "${AZURE_STORAGE_ACCOUNT}" \
-#   --account-key "${AZURE_STORAGE_KEY}" \
-#   --container-name "${AZURE_CONTAINER_NAME}" \
-#   --name "${BACKUP_FILENAME}" \
-#   --file "${TEMP_DIR}/${BACKUP_FILENAME}"
-
-exit 0
+echo "========================================="
+echo "Backup completed successfully!"
+echo "Azure URI: https://${AZURE_STORAGE_ACCOUNT}.blob.core.windows.net/${AZURE_STORAGE_CONTAINER}/${BACKUP_FILENAME}"
+echo "========================================="

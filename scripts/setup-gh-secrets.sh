@@ -1,6 +1,6 @@
 #!/bin/bash
 # EchoForge GitHub Secrets Setup Script
-# Reads Terraform outputs and configures GitHub Actions secrets
+# Reads Terraform outputs and configures GitHub Actions secrets for AWS, Azure, and GCP
 
 set -euo pipefail
 
@@ -8,15 +8,19 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-TERRAFORM_DIR="${TERRAFORM_DIR:-./infra/aws/terraform}"
+AWS_TERRAFORM_DIR="${AWS_TERRAFORM_DIR:-./infra/aws/terraform}"
+AZURE_TERRAFORM_DIR="${AZURE_TERRAFORM_DIR:-./infra/azure/terraform}"
+GCP_TERRAFORM_DIR="${GCP_TERRAFORM_DIR:-./infra/gcp/terraform}"
 REPO_OWNER="${GITHUB_REPOSITORY_OWNER:-}"
 REPO_NAME="${GITHUB_REPOSITORY_NAME:-}"
 
 echo "========================================="
 echo "EchoForge GitHub Secrets Setup"
+echo "Multi-Cloud Configuration"
 echo "========================================="
 
 # Check if gh CLI is installed
@@ -56,67 +60,115 @@ REPO_FULL="${REPO_OWNER}/${REPO_NAME}"
 echo "Repository: ${REPO_FULL}"
 echo ""
 
-# Check if Terraform directory exists
-if [ ! -d "${TERRAFORM_DIR}" ]; then
-  echo -e "${RED}Error: Terraform directory not found: ${TERRAFORM_DIR}${NC}"
-  exit 1
+# Function to set GitHub secret
+set_secret() {
+  local secret_name=$1
+  local secret_value=$2
+  gh secret set "${secret_name}" --body "${secret_value}" --repo "${REPO_FULL}"
+  echo -e "${GREEN}✓ Set ${secret_name}${NC}"
+}
+
+# AWS Configuration
+echo -e "${BLUE}=== AWS Configuration ===${NC}"
+if [ -d "${AWS_TERRAFORM_DIR}" ] && [ -f "${AWS_TERRAFORM_DIR}/terraform.tfstate" ]; then
+  echo "Reading AWS Terraform outputs..."
+  cd "${AWS_TERRAFORM_DIR}"
+  
+  BUCKET_NAME=$(terraform output -raw backup_bucket_name 2>/dev/null)
+  AWS_REGION=$(terraform output -raw aws_region 2>/dev/null)
+  AWS_ACCESS_KEY_ID=$(terraform output -raw aws_access_key_id 2>/dev/null)
+  AWS_SECRET_ACCESS_KEY=$(terraform output -raw aws_secret_access_key 2>/dev/null)
+  
+  if [ -n "${BUCKET_NAME}" ] && [ -n "${AWS_REGION}" ] && [ -n "${AWS_ACCESS_KEY_ID}" ] && [ -n "${AWS_SECRET_ACCESS_KEY}" ]; then
+    echo -e "${GREEN}✓ AWS Terraform outputs retrieved${NC}"
+    cd - > /dev/null
+    
+    set_secret "AWS_REGION" "${AWS_REGION}"
+    set_secret "AWS_ACCESS_KEY_ID" "${AWS_ACCESS_KEY_ID}"
+    set_secret "AWS_SECRET_ACCESS_KEY" "${AWS_SECRET_ACCESS_KEY}"
+    set_secret "AWS_BACKUP_BUCKET" "${BUCKET_NAME}"
+    # Legacy name for backward compatibility
+    set_secret "BACKUP_BUCKET" "${BUCKET_NAME}"
+    echo ""
+  else
+    echo -e "${YELLOW}⚠ AWS Terraform outputs incomplete or missing${NC}"
+    cd - > /dev/null
+  fi
+else
+  echo -e "${YELLOW}⚠ AWS Terraform not found or not applied${NC}"
+  echo "  Directory: ${AWS_TERRAFORM_DIR}"
 fi
-
-# Check if Terraform has been applied
-if [ ! -f "${TERRAFORM_DIR}/terraform.tfstate" ]; then
-  echo -e "${RED}Error: Terraform state not found${NC}"
-  echo "Run 'terraform apply' in ${TERRAFORM_DIR} first"
-  exit 1
-fi
-
-echo "Reading Terraform outputs..."
-cd "${TERRAFORM_DIR}"
-
-# Extract outputs using terraform output
-BUCKET_NAME=$(terraform output -raw backup_bucket_name 2>/dev/null)
-AWS_REGION=$(terraform output -raw aws_region 2>/dev/null)
-AWS_ACCESS_KEY_ID=$(terraform output -raw aws_access_key_id 2>/dev/null)
-AWS_SECRET_ACCESS_KEY=$(terraform output -raw aws_secret_access_key 2>/dev/null)
-
-# Validate outputs
-if [ -z "${BUCKET_NAME}" ] || [ -z "${AWS_REGION}" ] || [ -z "${AWS_ACCESS_KEY_ID}" ] || [ -z "${AWS_SECRET_ACCESS_KEY}" ]; then
-  echo -e "${RED}Error: Failed to read Terraform outputs${NC}"
-  echo "Ensure Terraform has been applied successfully"
-  exit 1
-fi
-
-echo -e "${GREEN}✓ Terraform outputs retrieved${NC}"
 echo ""
 
-# Set GitHub secrets
-echo "Setting GitHub Actions secrets..."
-
-gh secret set AWS_REGION --body "${AWS_REGION}" --repo "${REPO_FULL}"
-echo -e "${GREEN}✓ Set AWS_REGION${NC}"
-
-gh secret set AWS_ACCESS_KEY_ID --body "${AWS_ACCESS_KEY_ID}" --repo "${REPO_FULL}"
-echo -e "${GREEN}✓ Set AWS_ACCESS_KEY_ID${NC}"
-
-gh secret set AWS_SECRET_ACCESS_KEY --body "${AWS_SECRET_ACCESS_KEY}" --repo "${REPO_FULL}"
-echo -e "${GREEN}✓ Set AWS_SECRET_ACCESS_KEY${NC}"
-
-gh secret set BACKUP_BUCKET --body "${BUCKET_NAME}" --repo "${REPO_FULL}"
-echo -e "${GREEN}✓ Set BACKUP_BUCKET${NC}"
-
+# Azure Configuration
+echo -e "${BLUE}=== Azure Configuration ===${NC}"
+if [ -d "${AZURE_TERRAFORM_DIR}" ] && [ -f "${AZURE_TERRAFORM_DIR}/terraform.tfstate" ]; then
+  echo "Reading Azure Terraform outputs..."
+  cd "${AZURE_TERRAFORM_DIR}"
+  
+  AZURE_STORAGE_ACCOUNT=$(terraform output -raw storage_account_name 2>/dev/null)
+  AZURE_STORAGE_CONTAINER=$(terraform output -raw container_name 2>/dev/null)
+  AZURE_CREDENTIALS=$(terraform output -raw azure_credentials_json 2>/dev/null)
+  
+  if [ -n "${AZURE_STORAGE_ACCOUNT}" ] && [ -n "${AZURE_STORAGE_CONTAINER}" ] && [ -n "${AZURE_CREDENTIALS}" ]; then
+    echo -e "${GREEN}✓ Azure Terraform outputs retrieved${NC}"
+    cd - > /dev/null
+    
+    set_secret "AZURE_CREDENTIALS" "${AZURE_CREDENTIALS}"
+    set_secret "AZURE_STORAGE_ACCOUNT" "${AZURE_STORAGE_ACCOUNT}"
+    set_secret "AZURE_STORAGE_CONTAINER" "${AZURE_STORAGE_CONTAINER}"
+    echo ""
+  else
+    echo -e "${YELLOW}⚠ Azure Terraform outputs incomplete or missing${NC}"
+    cd - > /dev/null
+  fi
+else
+  echo -e "${YELLOW}⚠ Azure Terraform not found or not applied${NC}"
+  echo "  Directory: ${AZURE_TERRAFORM_DIR}"
+fi
 echo ""
+
+# GCP Configuration
+echo -e "${BLUE}=== GCP Configuration ===${NC}"
+if [ -d "${GCP_TERRAFORM_DIR}" ] && [ -f "${GCP_TERRAFORM_DIR}/terraform.tfstate" ]; then
+  echo "Reading GCP Terraform outputs..."
+  cd "${GCP_TERRAFORM_DIR}"
+  
+  GCP_PROJECT_ID=$(terraform output -raw project_id 2>/dev/null)
+  GCS_BUCKET=$(terraform output -raw bucket_name 2>/dev/null)
+  GCP_SA_KEY=$(terraform output -raw service_account_key 2>/dev/null)
+  
+  if [ -n "${GCP_PROJECT_ID}" ] && [ -n "${GCS_BUCKET}" ] && [ -n "${GCP_SA_KEY}" ]; then
+    echo -e "${GREEN}✓ GCP Terraform outputs retrieved${NC}"
+    cd - > /dev/null
+    
+    set_secret "GCP_SA_KEY" "${GCP_SA_KEY}"
+    set_secret "GCP_PROJECT_ID" "${GCP_PROJECT_ID}"
+    set_secret "GCS_BUCKET" "${GCS_BUCKET}"
+    echo ""
+  else
+    echo -e "${YELLOW}⚠ GCP Terraform outputs incomplete or missing${NC}"
+    cd - > /dev/null
+  fi
+else
+  echo -e "${YELLOW}⚠ GCP Terraform not found or not applied${NC}"
+  echo "  Directory: ${GCP_TERRAFORM_DIR}"
+fi
+echo ""
+
 echo "========================================="
-echo -e "${GREEN}GitHub secrets configured successfully!${NC}"
+echo -e "${GREEN}GitHub secrets configuration completed!${NC}"
 echo "========================================="
 echo ""
 echo "Configured secrets:"
-echo "  - AWS_REGION"
-echo "  - AWS_ACCESS_KEY_ID"
-echo "  - AWS_SECRET_ACCESS_KEY"
-echo "  - BACKUP_BUCKET"
+gh secret list --repo "${REPO_FULL}" | grep -E "AWS_|AZURE_|GCP_|GCS_|BACKUP_" || echo "  (none found matching AWS/AZURE/GCP patterns)"
 echo ""
 echo -e "${YELLOW}Optional: Set SLACK_WEBHOOK_URL for notifications${NC}"
 echo "Run: gh secret set SLACK_WEBHOOK_URL --repo ${REPO_FULL}"
 echo ""
 echo "Next steps:"
 echo "  1. Verify secrets: gh secret list --repo ${REPO_FULL}"
-echo "  2. Test backup workflow: gh workflow run self-heal-agent.yml --repo ${REPO_FULL}"
+echo "  2. Test backup workflow:"
+echo "     AWS:   gh workflow run self-heal-agent.yml --field backup_source=aws --field operation=backup --repo ${REPO_FULL}"
+echo "     Azure: gh workflow run self-heal-agent.yml --field backup_source=azure --field operation=backup --repo ${REPO_FULL}"
+echo "     GCP:   gh workflow run self-heal-agent.yml --field backup_source=gcp --field operation=backup --repo ${REPO_FULL}"

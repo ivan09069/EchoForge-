@@ -1,6 +1,6 @@
 #!/bin/bash
 # EchoForge GCP Backup Script
-# Placeholder for future Google Cloud Storage implementation
+# Archives the current repository and uploads to Google Cloud Storage
 
 set -euo pipefail
 
@@ -9,6 +9,10 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILENAME="echoforge-backup-${TIMESTAMP}.tar.gz"
 TEMP_DIR=$(mktemp -d)
 
+# Required environment variables
+: "${GCS_BUCKET:?GCS_BUCKET must be set}"
+: "${GCP_PROJECT_ID:?GCP_PROJECT_ID must be set}"
+
 # Cleanup function
 cleanup() {
   rm -rf "${TEMP_DIR}"
@@ -16,9 +20,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "========================================="
-echo "EchoForge GCP Backup (Placeholder)"
+echo "EchoForge GCP Backup"
 echo "========================================="
 echo "Timestamp: ${TIMESTAMP}"
+echo "Bucket: ${GCS_BUCKET}"
+echo "Project: ${GCP_PROJECT_ID}"
 echo "========================================="
 
 # Create git archive of current HEAD
@@ -29,17 +35,11 @@ git archive --format=tar.gz --prefix=echoforge/ HEAD > "${TEMP_DIR}/${BACKUP_FIL
 ARCHIVE_SIZE=$(du -h "${TEMP_DIR}/${BACKUP_FILENAME}" | cut -f1)
 echo "Archive created: ${BACKUP_FILENAME} (${ARCHIVE_SIZE})"
 
-echo "========================================="
-echo "GCP backup implementation pending"
-echo "TODO: Upload to Google Cloud Storage"
-echo "Required environment variables:"
-echo "  - GCP_PROJECT_ID"
-echo "  - GCP_BUCKET_NAME"
-echo "  - GOOGLE_APPLICATION_CREDENTIALS (path to service account key)"
-echo "========================================="
+# Upload to Google Cloud Storage
+echo "Uploading to Google Cloud Storage..."
+gsutil cp "${TEMP_DIR}/${BACKUP_FILENAME}" "gs://${GCS_BUCKET}/${BACKUP_FILENAME}"
 
-# Future implementation:
-# gsutil cp "${TEMP_DIR}/${BACKUP_FILENAME}" \
-#   "gs://${GCP_BUCKET_NAME}/${BACKUP_FILENAME}"
-
-exit 0
+echo "========================================="
+echo "Backup completed successfully!"
+echo "GCS URI: gs://${GCS_BUCKET}/${BACKUP_FILENAME}"
+echo "========================================="
