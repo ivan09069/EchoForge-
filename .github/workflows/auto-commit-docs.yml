@@ -3,6 +3,7 @@ name: Auto Commit Docs
 on:
   schedule:
     - cron: '0 2 * * *'
+    - cron: '0 2 * * *' # daily at 02:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -35,6 +36,7 @@ jobs:
 
       - name: Commit & Push changes
         if: steps.check_changes.outputs.changed == 'true'
+      - name: Commit & Push changes
         uses: EndBug/add-and-commit@v9
         with:
           author_name: EchoForge Automation
