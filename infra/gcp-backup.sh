@@ -1,5 +1,6 @@
 #!/bin/bash
 # EchoForge GCP Backup Script
+# Archives the current repository and uploads to Google Cloud Storage
 # Creates and uploads backup to Google Cloud Storage
 
 set -euo pipefail
@@ -9,6 +10,9 @@ TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILENAME="echoforge-backup-${TIMESTAMP}.tar.gz"
 TEMP_DIR=$(mktemp -d)
 
+# Required environment variables
+: "${GCS_BUCKET:?GCS_BUCKET must be set}"
+: "${GCP_PROJECT_ID:?GCP_PROJECT_ID must be set}"
 # GCP configuration from environment
 GCP_BUCKET_NAME="${GCP_BUCKET_NAME:-}"
 GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}"
@@ -24,6 +28,8 @@ echo "========================================="
 echo "EchoForge GCP Backup"
 echo "========================================="
 echo "Timestamp: ${TIMESTAMP}"
+echo "Bucket: ${GCS_BUCKET}"
+echo "Project: ${GCP_PROJECT_ID}"
 echo "Bucket: ${GCP_BUCKET_NAME}"
 echo "========================================="
 
@@ -41,6 +47,14 @@ git archive --format=tar.gz --prefix=echoforge/ HEAD > "${TEMP_DIR}/${BACKUP_FIL
 ARCHIVE_SIZE=$(du -h "${TEMP_DIR}/${BACKUP_FILENAME}" | cut -f1)
 echo "Archive created: ${BACKUP_FILENAME} (${ARCHIVE_SIZE})"
 
+# Upload to Google Cloud Storage
+echo "Uploading to Google Cloud Storage..."
+gsutil cp "${TEMP_DIR}/${BACKUP_FILENAME}" "gs://${GCS_BUCKET}/${BACKUP_FILENAME}"
+
+echo "========================================="
+echo "Backup completed successfully!"
+echo "GCS URI: gs://${GCS_BUCKET}/${BACKUP_FILENAME}"
+echo "========================================="
 # Generate checksum
 echo "Generating checksum..."
 CHECKSUM=$(openssl sha256 "${TEMP_DIR}/${BACKUP_FILENAME}" | awk '{print $2}')

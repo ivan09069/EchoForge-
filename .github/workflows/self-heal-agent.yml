@@ -70,28 +70,46 @@ jobs:
         run: |
           bash infra/aws-backup.sh
 
+      - name: Authenticate to Azure
+        if: >-
+          ${{ github.event_name == 'workflow_dispatch' &&
+              inputs.backup_source == 'azure' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Execute Azure backup
         if: >-
           ${{ github.event_name == 'workflow_dispatch' &&
               inputs.backup_source == 'azure' }}
         env:
           AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
-          AZURE_CONTAINER_NAME: ${{ secrets.AZURE_CONTAINER_NAME }}
+          AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
         run: |
           bash infra/azure-backup.sh
+
+      - name: Authenticate to GCP
+        if: >-
+          ${{ github.event_name == 'workflow_dispatch' &&
+              inputs.backup_source == 'gcp' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud SDK
+        if: >-
+          ${{ github.event_name == 'workflow_dispatch' &&
+              inputs.backup_source == 'gcp' }}
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Execute GCP backup
         if: >-
           ${{ github.event_name == 'workflow_dispatch' &&
               inputs.backup_source == 'gcp' }}
         env:
-          GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
         run: |
-          # Setup GCP credentials
-          echo "${{ secrets.GCP_CREDENTIALS }}" | base64 -d > /tmp/gcp-key.json
           bash infra/gcp-backup.sh
           rm -f /tmp/gcp-key.json
 
@@ -173,35 +191,34 @@ jobs:
           echo "Restored contents:"
           ls -la /tmp/restore/
 
+      - name: Authenticate to Azure
+        if: ${{ inputs.backup_source == 'azure' }}
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
       - name: Restore from Azure
         if: ${{ inputs.backup_source == 'azure' }}
         env:
           AZURE_STORAGE_ACCOUNT: ${{ secrets.AZURE_STORAGE_ACCOUNT }}
-          AZURE_STORAGE_KEY: ${{ secrets.AZURE_STORAGE_KEY }}
-          AZURE_CONTAINER_NAME: ${{ secrets.AZURE_CONTAINER_NAME }}
+          AZURE_STORAGE_CONTAINER: ${{ secrets.AZURE_STORAGE_CONTAINER }}
         run: |
           echo "========================================="
           echo "EchoForge Restore from Azure"
           echo "========================================="
           echo "Filename: ${{ inputs.filename }}"
-          echo "Container: ${AZURE_CONTAINER_NAME}"
+          echo "Storage Account: ${AZURE_STORAGE_ACCOUNT}"
+          echo "Container: ${AZURE_STORAGE_CONTAINER}"
           echo "========================================="
-
-          FNAME="${{ inputs.filename }}"
 
           # Download backup from Azure Blob Storage
           echo "Downloading backup from Azure..."
-          if command -v az &> /dev/null; then
-            az storage blob download \
-              --account-name "${AZURE_STORAGE_ACCOUNT}" \
-              --account-key "${AZURE_STORAGE_KEY}" \
-              --container-name "${AZURE_CONTAINER_NAME}" \
-              --name "${FNAME}" \
-              --file "/tmp/${FNAME}"
-          else
-            echo "Error: Azure CLI not available"
-            exit 1
-          fi
+          FNAME="${{ inputs.filename }}"
+          az storage blob download \
+            --account-name "${AZURE_STORAGE_ACCOUNT}" \
+            --container-name "${AZURE_STORAGE_CONTAINER}" \
+            --name "${FNAME}" \
+            --file "/tmp/${FNAME}"
 
           # Verify archive
           echo "Verifying archive integrity..."
@@ -224,38 +241,34 @@ jobs:
           echo "Restored contents:"
           ls -la /tmp/restore/
 
+      - name: Authenticate to GCP
+        if: ${{ inputs.backup_source == 'gcp' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup Google Cloud SDK
+        if: ${{ inputs.backup_source == 'gcp' }}
+        uses: google-github-actions/setup-gcloud@v2
+
       - name: Restore from GCP
         if: ${{ inputs.backup_source == 'gcp' }}
         env:
-          GCP_BUCKET_NAME: ${{ secrets.GCP_BUCKET_NAME }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-key.json
+          GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
         run: |
           echo "========================================="
           echo "EchoForge Restore from GCP"
           echo "========================================="
           echo "Filename: ${{ inputs.filename }}"
-          echo "Bucket: ${GCP_BUCKET_NAME}"
+          echo "Bucket: ${GCS_BUCKET}"
+          echo "Project: ${GCP_PROJECT_ID}"
           echo "========================================="
-
-          # Setup GCP credentials
-          echo "${{ secrets.GCP_CREDENTIALS }}" | base64 -d > /tmp/gcp-key.json
-
-          FNAME="${{ inputs.filename }}"
 
           # Download backup from Google Cloud Storage
           echo "Downloading backup from GCS..."
-          if command -v gsutil &> /dev/null; then
-            gsutil cp "gs://${GCP_BUCKET_NAME}/${FNAME}" "/tmp/${FNAME}"
-          elif command -v gcloud &> /dev/null; then
-            gcloud storage cp "gs://${GCP_BUCKET_NAME}/${FNAME}" "/tmp/${FNAME}"
-          else
-            echo "Error: Neither gsutil nor gcloud is available"
-            exit 1
-          fi
-
-          # Cleanup credentials
-          rm -f /tmp/gcp-key.json
+          FNAME="${{ inputs.filename }}"
+          gsutil cp "gs://${GCS_BUCKET}/${FNAME}" "/tmp/${FNAME}"
 
           # Verify archive
           echo "Verifying archive integrity..."

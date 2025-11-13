@@ -1,5 +1,5 @@
 # Main Terraform configuration for EchoForge Azure backup infrastructure
-# Creates Azure Storage Account, Key Vault, and Service Principal with least-privilege access
+# Creates Resource Group, Key Vault, Storage Account with CMK encryption
 
 terraform {
   required_version = ">= 1.0"
@@ -18,183 +18,74 @@ terraform {
 provider "azurerm" {
   features {
     key_vault {
-      purge_soft_delete_on_destroy = true
+      purge_soft_delete_on_destroy    = false
+      recover_soft_deleted_key_vaults = true
     }
   }
 }
 
-provider "azuread" {}
-
-# Data source for current Azure client configuration
 data "azurerm_client_config" "current" {}
 
-# Resource group for all backup resources
+# Resource Group (optional - can use existing)
 resource "azurerm_resource_group" "backup_rg" {
-  name     = "${var.project_name}-backup-rg"
-  location = var.azure_location
+  count    = var.create_resource_group ? 1 : 0
+  name     = var.resource_group_name
+  location = var.location
 
   tags = {
-    Name        = "${var.project_name}-backup-rg"
     Environment = var.environment
     Project     = var.project_name
   }
 }
 
-# Storage account for backup data
-# Configured with encryption, versioning, and secure transfer
-resource "azurerm_storage_account" "backup_storage" {
-  name                     = var.storage_account_name
-  resource_group_name      = azurerm_resource_group.backup_rg.name
-  location                 = azurerm_resource_group.backup_rg.location
-  account_tier             = "Standard"
-  account_replication_type = "GRS" # Geo-redundant storage
-  account_kind             = "StorageV2"
-
-  # Security settings
-  min_tls_version                 = "TLS1_2"
-  enable_https_traffic_only       = true
-  allow_nested_items_to_be_public = false
-
-  # Blob encryption settings
-  blob_properties {
-    versioning_enabled = true
-
-    delete_retention_policy {
-      days = 30
-    }
-
-    container_delete_retention_policy {
-      days = 30
-    }
-  }
-
-  tags = {
-    Name        = "${var.project_name}-backup-storage"
-    Environment = var.environment
-    Project     = var.project_name
-  }
+# Data source for existing resource group
+data "azurerm_resource_group" "existing_rg" {
+  count = var.create_resource_group ? 0 : 1
+  name  = var.resource_group_name
 }
 
-# Blob container for backups
-resource "azurerm_storage_container" "backup_container" {
-  name                  = "backups"
-  storage_account_name  = azurerm_storage_account.backup_storage.name
-  container_access_type = "private"
+locals {
+  resource_group_name = var.create_resource_group ? azurerm_resource_group.backup_rg[0].name : data.azurerm_resource_group.existing_rg[0].name
+  resource_group_id   = var.create_resource_group ? azurerm_resource_group.backup_rg[0].id : data.azurerm_resource_group.existing_rg[0].id
 }
 
-# Lifecycle management policy for cost optimization
-resource "azurerm_storage_management_policy" "backup_lifecycle" {
-  storage_account_id = azurerm_storage_account.backup_storage.id
-
-  rule {
-    name    = "backup-lifecycle-rule"
-    enabled = true
-
-    filters {
-      blob_types   = ["blockBlob"]
-      prefix_match = ["backups/"]
-    }
-
-    actions {
-      base_blob {
-        tier_to_cool_after_days_since_modification_greater_than    = 30
-        tier_to_archive_after_days_since_modification_greater_than = 90
-      }
-
-      version {
-        delete_after_days_since_creation = 365
-      }
-    }
-  }
-}
-
-# Key Vault for storing encryption keys
+# Key Vault for storing keys and secrets
 resource "azurerm_key_vault" "backup_kv" {
-  name                = "${var.project_name}-backup-kv"
-  location            = azurerm_resource_group.backup_rg.location
-  resource_group_name = azurerm_resource_group.backup_rg.name
-  tenant_id           = data.azurerm_client_config.current.tenant_id
-  sku_name            = "standard"
+  name                       = var.key_vault_name
+  location                   = var.location
+  resource_group_name        = local.resource_group_name
+  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  sku_name                   = "standard"
+  soft_delete_retention_days = 7
+  purge_protection_enabled   = false
 
-  # Security settings
-  enabled_for_deployment          = false
-  enabled_for_disk_encryption     = false
-  enabled_for_template_deployment = false
-  purge_protection_enabled        = false
-  soft_delete_retention_days      = 7
+  enabled_for_disk_encryption = true
+  enabled_for_deployment      = false
 
   tags = {
-    Name        = "${var.project_name}-backup-kv"
+    Name        = "${var.project_name}-backup-keyvault"
     Environment = var.environment
     Project     = var.project_name
   }
 }
 
-# Key Vault access policy for current user (for initial setup)
-resource "azurerm_key_vault_access_policy" "current_user" {
+# Access policy for current user/service principal
+resource "azurerm_key_vault_access_policy" "deployer" {
   key_vault_id = azurerm_key_vault.backup_kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = data.azurerm_client_config.current.object_id
 
   key_permissions = [
-    "Get",
-    "List",
-    "Create",
-    "Delete",
-    "Purge",
+    "Get", "List", "Create", "Delete", "Update", "Recover", "Purge",
+    "GetRotationPolicy", "SetRotationPolicy"
   ]
 
   secret_permissions = [
-    "Get",
-    "List",
-    "Set",
-    "Delete",
-    "Purge",
+    "Get", "List", "Set", "Delete", "Recover", "Purge"
   ]
 }
 
-# Azure AD Application for backup operations
-resource "azuread_application" "backup_app" {
-  display_name = "${var.project_name}-backup-app"
-}
-
-# Service Principal for the application
-resource "azuread_service_principal" "backup_sp" {
-  client_id = azuread_application.backup_app.client_id
-}
-
-# Service Principal password (client secret)
-resource "azuread_service_principal_password" "backup_sp_password" {
-  service_principal_id = azuread_service_principal.backup_sp.id
-  end_date_relative    = "8760h" # 1 year
-}
-
-# Role assignment: Storage Blob Data Contributor on the storage account
-# Provides least-privilege access for backup operations
-resource "azurerm_role_assignment" "backup_sp_storage" {
-  scope                = azurerm_storage_account.backup_storage.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azuread_service_principal.backup_sp.object_id
-}
-
-# Key Vault access policy for Service Principal
-resource "azurerm_key_vault_access_policy" "backup_sp" {
-  key_vault_id = azurerm_key_vault.backup_kv.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azuread_service_principal.backup_sp.object_id
-
-  key_permissions = [
-    "Get",
-    "List",
-  ]
-
-  secret_permissions = [
-    "Get",
-    "List",
-  ]
-}
-
-# Customer-managed encryption key in Key Vault
+# RSA Key for CMK encryption
 resource "azurerm_key_vault_key" "backup_key" {
   name         = "${var.project_name}-backup-key"
   key_vault_id = azurerm_key_vault.backup_kv.id
@@ -211,12 +102,135 @@ resource "azurerm_key_vault_key" "backup_key" {
   ]
 
   depends_on = [
-    azurerm_key_vault_access_policy.current_user
+    azurerm_key_vault_access_policy.deployer
   ]
 
   tags = {
-    Name        = "${var.project_name}-backup-key"
     Environment = var.environment
     Project     = var.project_name
   }
+}
+
+# Storage Account with system-assigned identity
+resource "azurerm_storage_account" "backup_storage" {
+  name                     = var.storage_account_name
+  resource_group_name      = local.resource_group_name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  min_tls_version          = "TLS1_2"
+
+  # System-assigned managed identity for CMK
+  identity {
+    type = "SystemAssigned"
+  }
+
+  # Versioning and change feed
+  blob_properties {
+    versioning_enabled  = true
+    change_feed_enabled = true
+
+    delete_retention_policy {
+      days = 7
+    }
+
+    container_delete_retention_policy {
+      days = 7
+    }
+  }
+
+  tags = {
+    Name        = "${var.project_name}-backup-storage"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Access policy for Storage Account managed identity to use Key Vault key
+resource "azurerm_key_vault_access_policy" "storage" {
+  key_vault_id = azurerm_key_vault.backup_kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_storage_account.backup_storage.identity[0].principal_id
+
+  key_permissions = [
+    "Get", "UnwrapKey", "WrapKey"
+  ]
+
+  depends_on = [
+    azurerm_key_vault_access_policy.deployer
+  ]
+}
+
+# Customer-Managed Key encryption for Storage Account
+resource "azurerm_storage_account_customer_managed_key" "backup_cmk" {
+  storage_account_id = azurerm_storage_account.backup_storage.id
+  key_vault_id       = azurerm_key_vault.backup_kv.id
+  key_name           = azurerm_key_vault_key.backup_key.name
+
+  depends_on = [
+    azurerm_key_vault_access_policy.storage
+  ]
+}
+
+# Private Blob container for backups
+resource "azurerm_storage_container" "backup_container" {
+  name                  = var.container_name
+  storage_account_name  = azurerm_storage_account.backup_storage.name
+  container_access_type = "private"
+}
+
+# Management policy for lifecycle management
+resource "azurerm_storage_management_policy" "backup_lifecycle" {
+  storage_account_id = azurerm_storage_account.backup_storage.id
+
+  rule {
+    name    = "backup-lifecycle-rule"
+    enabled = true
+
+    filters {
+      blob_types = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        tier_to_cool_after_days_since_modification_greater_than    = 30
+        tier_to_archive_after_days_since_modification_greater_than = 90
+      }
+
+      version {
+        delete_after_days_since_creation = 365
+      }
+
+      snapshot {
+        delete_after_days_since_creation_greater_than = 365
+      }
+    }
+  }
+}
+
+# Azure AD Application for CI/CD
+resource "azuread_application" "backup_app" {
+  display_name = "${var.project_name}-backup-app"
+
+  tags = [var.environment, var.project_name, "backup", "ci"]
+}
+
+# Service Principal for the application
+resource "azuread_service_principal" "backup_sp" {
+  client_id = azuread_application.backup_app.client_id
+
+  tags = [var.environment, var.project_name, "backup", "ci"]
+}
+
+# Service Principal password/secret
+resource "azuread_service_principal_password" "backup_sp_password" {
+  service_principal_id = azuread_service_principal.backup_sp.id
+  end_date             = timeadd(timestamp(), "8760h") # 1 year
+}
+
+# Role assignment: Storage Blob Data Contributor on container
+resource "azurerm_role_assignment" "sp_blob_contributor" {
+  scope                = azurerm_storage_account.backup_storage.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azuread_service_principal.backup_sp.object_id
 }

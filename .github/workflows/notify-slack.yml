@@ -1,11 +1,11 @@
----
 name: Notify Slack
 
-'on':
+on:
   workflow_run:
     workflows: ["Self-Heal Agent"]
-    types:
-      - completed
+    types: [completed]
+
+permissions: {}
 
 jobs:
   notify:
@@ -13,90 +13,114 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Determine workflow status
+      - name: Derive status
         id: status
+        shell: bash
         run: |
-          CONCLUSION="${{ github.event.workflow_run.conclusion }}"
-          if [ "${CONCLUSION}" == "success" ]; then
-            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
-            echo "color=good" >> $GITHUB_OUTPUT
-            echo "status_text=succeeded" >> $GITHUB_OUTPUT
-          elif [ "${CONCLUSION}" == "failure" ]; then
-            echo "emoji=:x:" >> $GITHUB_OUTPUT
-            echo "color=danger" >> $GITHUB_OUTPUT
-            echo "status_text=failed" >> $GITHUB_OUTPUT
-          else
-            echo "emoji=:warning:" >> $GITHUB_OUTPUT
-            echo "color=warning" >> $GITHUB_OUTPUT
-            echo "status_text=${CONCLUSION}" >> $GITHUB_OUTPUT
-          fi
+          set -euo pipefail
+          c="${{ github.event.workflow_run.conclusion }}"
+          case "$c" in
+            success)
+              echo "emoji=:white_check_mark:" >"$GITHUB_OUTPUT"
+              echo "color=good" >"$GITHUB_OUTPUT"
+              echo "status_text=Succeeded" >"$GITHUB_OUTPUT"
+              ;;
+            failure)
+              echo "emoji=:x:" >"$GITHUB_OUTPUT"
+              echo "color=danger" >"$GITHUB_OUTPUT"
+              echo "status_text=Failed" >"$GITHUB_OUTPUT"
+              ;;
+            cancelled)
+              echo "emoji=:no_entry_sign:" >"$GITHUB_OUTPUT"
+              echo "color=warning" >"$GITHUB_OUTPUT"
+              echo "status_text=Cancelled" >"$GITHUB_OUTPUT"
+              ;;
+            skipped)
+              echo "emoji=:arrow_right:" >"$GITHUB_OUTPUT"
+              echo "color=warning" >"$GITHUB_OUTPUT"
+              echo "status_text=Skipped" >"$GITHUB_OUTPUT"
+              ;;
+            timed_out)
+              echo "emoji=:alarm_clock:" >"$GITHUB_OUTPUT"
+              echo "color=danger" >"$GITHUB_OUTPUT"
+              echo "status_text=Timed Out" >"$GITHUB_OUTPUT"
+              ;;
+            action_required)
+              echo "emoji=:warning:" >"$GITHUB_OUTPUT"
+              echo "color=warning" >"$GITHUB_OUTPUT"
+              echo "status_text=Action Required" >"$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "emoji=:grey_question:" >"$GITHUB_OUTPUT"
+              echo "color=warning" >"$GITHUB_OUTPUT"
+              echo "status_text=$c" >"$GITHUB_OUTPUT"
+              ;;
+          esac
 
       - name: Send Slack notification
         if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        shell: bash
         run: |
-          # Prepare Slack message payload
-          RUN_TIME="$(date -u -d \
-            "${{ github.event.workflow_run.created_at }}" \
-            "+%Y-%m-%d %H:%M:%S UTC")"
+          set -euo pipefail
 
-          cat <<EOF > /tmp/slack-payload.json
-          {
-            "text": "EchoForge Self-Heal Agent Workflow Completed",
-            "attachments": [
-              {
-                "color": "${{ steps.status.outputs.color }}",
-                "fields": [
-                  {
-                    "title": "Status",
-                    "value": "${{ steps.status.outputs.emoji }} \
-          ${{ steps.status.outputs.status_text }}",
-                    "short": true
-                  },
-                  {
-                    "title": "Repository",
-                    "value": "${{ github.repository }}",
-                    "short": true
-                  },
-                  {
-                    "title": "Workflow",
-                    "value": "${{ github.event.workflow_run.name }}",
-                    "short": true
-                  },
-                  {
-                    "title": "Run Number",
-                    "value": "#${{ github.event.workflow_run.run_number }}",
-                    "short": true
-                  },
-                  {
-                    "title": "Triggered By",
-                    "value": "${{ github.event.workflow_run.actor.login }}",
-                    "short": true
-                  },
-                  {
-                    "title": "Run Time",
-                    "value": "${RUN_TIME}",
-                    "short": true
-                  }
-                ],
-                "actions": [
-                  {
-                    "type": "button",
-                    "text": "View Workflow Run",
-                    "url": "${{ github.event.workflow_run.html_url }}"
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
+          # Compute start and end times; prefer run_started_at/updated_at when available
+          start="${{ github.event.workflow_run.run_started_at || github.event.workflow_run.created_at }}"
+          end="${{ github.event.workflow_run.updated_at || github.event.workflow_run.completed_at || github.event.workflow_run.created_at }}"
 
-          # Send to Slack
-          curl -X POST \
+          # Convert to epoch seconds (Ubuntu runner provides GNU date)
+          start_s=$(date -u -d "$start" +%s || date -u +%s)
+          end_s=$(date -u -d "$end" +%s || date -u +%s)
+
+          dur=$(( end_s - start_s ))
+          if [ "$dur" -lt 0 ]; then dur=0; fi
+          duration="$(printf '%02d:%02d:%02d' $((dur/3600)) $(((dur%3600)/60)) $((dur%60)))"
+
+          payload=$(jq -n \
+            --arg color "${{ steps.status.outputs.color }}" \
+            --arg status "${{ steps.status.outputs.emoji }} ${{ steps.status.outputs.status_text }}" \
+            --arg repo "${{ github.repository }}" \
+            --arg workflow "${{ github.event.workflow_run.name }}" \
+            --arg run_number "${{ github.event.workflow_run.run_number }}" \
+            --arg actor "${{ github.event.workflow_run.actor.login }}" \
+            --arg run_url "${{ github.event.workflow_run.html_url }}" \
+            --arg started "$start" \
+            --arg duration "$duration" \
+            '{
+              text: "EchoForge Self-Heal Agent Workflow Completed",
+              attachments: [
+                {
+                  color: $color,
+                  fields: [
+                    {title: "Status", value: $status, short: true},
+                    {title: "Repository", value: $repo, short: true},
+                    {title: "Workflow", value: $workflow, short: true},
+                    {title: "Run Number", value: ("#" + $run_number), short: true},
+                    {title: "Triggered By", value: $actor, short: true},
+                    {title: "Started", value: $started, short: true},
+                    {title: "Duration (HH:MM:SS)", value: $duration, short: true}
+                  ],
+                  actions: [
+                    {type: "button", text: "View Workflow Run", url: $run_url}
+                  ]
+                }
+              ]
+            }')
+
+          echo "$payload" > /tmp/slack-payload.json
+
+          http_status=$(curl -sS -o /tmp/response.txt -w "%{http_code}" -X POST \
             -H 'Content-Type: application/json' \
             -d @/tmp/slack-payload.json \
-            "${SLACK_WEBHOOK_URL}"
+            --retry 3 --retry-delay 2 --max-time 10 \
+            "$SLACK_WEBHOOK_URL" || echo "000")
+
+          if [ "$http_status" != "200" ] && [ "$http_status" != "204" ]; then
+            echo "Slack notification failed with status: $http_status" >&2
+            cat /tmp/response.txt >&2 || true
+            exit 1
+          fi
 
           echo "Slack notification sent successfully"
 
@@ -105,5 +129,4 @@ jobs:
         run: |
           echo "SLACK_WEBHOOK_URL secret not configured"
           echo "To enable Slack notifications:"
-          echo "  gh secret set SLACK_WEBHOOK_URL \\"
-          echo "    --repo ${{ github.repository }}"
+          echo "  gh secret set SLACK_WEBHOOK_URL \\\n            --repo ${{ github.repository }}"

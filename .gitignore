@@ -13,3 +13,7 @@ coverage/
 !*.tfvars.example
 .terraform/
 .terraform.lock.hcl
+
+# Build artifacts
+*.zip
+*.tar.gz
