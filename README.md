@@ -172,6 +172,89 @@ export default {
 
 ---
 
+## 📈 RM²E Crypto Momentum Tracking
+
+EchoForge includes a production-grade **RM²E (Risk-Momentum-Magic-Effort)** scoring algorithm for cryptocurrency momentum tracking. This system helps identify explosive opportunities while managing risk through volatility-adjusted scoring.
+
+### RM²E Threshold Reference
+
+Use these calibrated thresholds to interpret RM²E scores:
+
+- **< 50**: Stagnant (avoid)
+- **50-100**: Normal momentum (HOLD)
+- **100-150**: Heating up (BUY)
+- **150+**: Explosive (STRONG BUY)
+- **> 300**: Parabolic (take profits)
+
+### Expected Score Ranges
+
+The enhanced algorithm produces differentiated scores based on market conditions:
+
+- **Bitcoin** (low volatility, high cap): typically 80-120
+- **Ethereum** (medium volatility): typically 100-150  
+- **Solana** (high volatility, lower cap): typically 150-300
+
+### Formula Breakdown
+
+```
+RM²E = (momentum × magic) / (risk × effort) × 100
+
+Where:
+- Risk: Volatility-adjusted (24h + 7d weighted standard deviation)
+- Momentum: Recent change weighted (70% 24h, 30% 7d)
+- Magic: Progressive multiplier (1x to 20x based on uptrend strength)
+- Effort: Liquidity penalty (inverse log of market cap)
+```
+
+**Component Details:**
+
+1. **Risk Calculation**: `Math.sqrt(Math.pow(change24h, 2) + Math.pow(change7d / 7, 2)) / 10`
+   - Volatility-based formula with 0.1 floor to prevent division by zero
+   
+2. **Momentum Scoring**: `change24h * 0.7 + change7d * 0.3`
+   - Weights recent changes higher
+   - Only positive momentum counts (negatives filtered to 0)
+   
+3. **Magic Multiplier**:
+   - change24h > 10%: magic = 20
+   - change24h > 5%: magic = 15
+   - change24h > 0%: magic = 10
+   - Otherwise: magic = 1
+   
+4. **Effort Calculation**: `Math.max(1, 100 / Math.log10(usd_market_cap + 10))`
+   - Larger market cap = easier entry = lower effort penalty
+
+### API Rate Limits
+
+The system implements exponential backoff to respect CoinGecko API limits:
+
+- **CoinGecko free tier**: 50 calls/min
+- **Current polling**: 24 calls/min (2.5s intervals)
+- **Safe margin**: Automatic backoff on 429 errors
+- **Max retry delay**: 60 seconds
+
+Rate limit protection doubles the delay on each 429 error (up to 60s max), then resets to 2.5s on successful fetch.
+
+### Usage Example
+
+```javascript
+import CryptoSparks from '../components/CryptoSparks';
+
+export default function Dashboard() {
+  return (
+    <div>
+      <h1>Portfolio Dashboard</h1>
+      <CryptoSparks 
+        symbols={['bitcoin', 'ethereum', 'solana']}
+        pollingInterval={2500}
+      />
+    </div>
+  );
+}
+```
+
+---
+
 ## 🏗️ Technology Stack
 
 ### Frontend

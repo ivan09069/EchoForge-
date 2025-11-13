@@ -1,4 +1,5 @@
 import PriceFeed from './PriceFeed';
+import CryptoSparks from './CryptoSparks';
 
 export default function Dashboard() {
   const holdings = [
@@ -20,6 +21,13 @@ export default function Dashboard() {
         ))}
       </ul>
       <PriceFeed symbols={holdings.map(h => h.symbol)} />
+      
+      <div style={{ marginTop: '40px' }}>
+        <CryptoSparks 
+          symbols={['bitcoin', 'ethereum', 'solana']}
+          pollingInterval={2500}
+        />
+      </div>
     </section>
   );
 }
