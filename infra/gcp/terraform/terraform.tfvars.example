@@ -1,0 +1,18 @@
+# Example Terraform variables file for EchoForge GCP backup infrastructure
+# Copy this file to terraform.tfvars and customize values
+
+# GCP Project ID (required)
+gcp_project_id = "YOUR_GCP_PROJECT_ID"
+
+# GCP region for resources
+gcp_region = "us-central1"
+
+# Unique bucket name (lowercase, hyphens allowed, globally unique)
+# Example: "echoforge-backup-prod"
+bucket_name = "YOUR_UNIQUE_BUCKET_NAME"
+
+# Environment tag
+environment = "production"
+
+# Project name tag
+project_name = "echoforge"

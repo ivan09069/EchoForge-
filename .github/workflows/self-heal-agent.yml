@@ -111,6 +111,7 @@ jobs:
           GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
         run: |
           bash infra/gcp-backup.sh
+          rm -f /tmp/gcp-key.json
 
       - name: Log to CloudWatch
         if: >-

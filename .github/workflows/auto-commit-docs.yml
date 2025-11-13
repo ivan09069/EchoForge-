@@ -1,0 +1,45 @@
+name: Auto Commit Docs
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+    - cron: '0 2 * * *' # daily at 02:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-commit-docs
+  cancel-in-progress: true
+
+jobs:
+  auto-commit-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Ensure docs and update timestamp
+        run: |
+          mkdir -p docs
+          echo "Last updated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" > docs/LAST_UPDATED.md
+
+      - name: Check for changes in docs
+        id: check_changes
+        run: |
+          if [[ -n "$(git status --porcelain docs/)" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit & Push changes
+        if: steps.check_changes.outputs.changed == 'true'
+      - name: Commit & Push changes
+        uses: EndBug/add-and-commit@v9
+        with:
+          author_name: EchoForge Automation
+          author_email: github0906@gmail.com
+          message: "Auto-update docs timestamp [skip ci]"
+          add: "docs/"

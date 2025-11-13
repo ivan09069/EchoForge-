@@ -1,0 +1,15 @@
+# Example Terraform variables file for EchoForge Azure backup infrastructure
+# Copy this file to terraform.tfvars and customize values
+
+# Azure region for resources
+azure_location = "eastus"
+
+# Unique storage account name (3-24 lowercase alphanumeric, globally unique)
+# Example: "echoforgebackup001"
+storage_account_name = "YOUR_UNIQUE_STORAGE_NAME"
+
+# Environment tag
+environment = "production"
+
+# Project name tag
+project_name = "echoforge"

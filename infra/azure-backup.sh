@@ -27,6 +27,16 @@ echo "Storage Account: ${AZURE_STORAGE_ACCOUNT}"
 echo "Container: ${AZURE_STORAGE_CONTAINER}"
 echo "========================================="
 
+# Validate required environment variables
+if [ -z "${AZURE_STORAGE_ACCOUNT}" ] || [ -z "${AZURE_STORAGE_KEY}" ]; then
+  echo "Error: Missing required environment variables"
+  echo "Required:"
+  echo "  - AZURE_STORAGE_ACCOUNT"
+  echo "  - AZURE_STORAGE_KEY"
+  echo "  - AZURE_CONTAINER_NAME (optional, defaults to 'backups')"
+  exit 1
+fi
+
 # Create git archive of current HEAD
 echo "Creating repository archive..."
 git archive --format=tar.gz --prefix=echoforge/ HEAD > "${TEMP_DIR}/${BACKUP_FILENAME}"

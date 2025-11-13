@@ -31,6 +31,18 @@ variable "container_name" {
   description = "Name of the blob container for backups"
   type        = string
   default     = "backups"
+# Define input variables for customization
+
+variable "azure_location" {
+  description = "Azure region for backup infrastructure"
+  type        = string
+  default     = "eastus"
+}
+
+variable "storage_account_name" {
+  description = "Unique Azure Storage Account name (3-24 lowercase alphanumeric characters, globally unique)"
+  type        = string
+  # No default - user must provide a unique storage account name
 }
 
 variable "environment" {
@@ -41,6 +53,7 @@ variable "environment" {
 
 variable "project_name" {
   description = "Project name for resource tagging"
+  description = "Project name for resource tagging (lowercase, no special characters)"
   type        = string
   default     = "echoforge"
 }

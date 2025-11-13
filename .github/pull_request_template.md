@@ -1,1 +1,0 @@
-<content of pull_request_template.md>
